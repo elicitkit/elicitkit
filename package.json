@@ -1,0 +1,27 @@
+{
+  "name": "elicitkit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A curated catalog of rich question types for AI agents \u2014 portable spec, MCP reference implementation, community pack registry.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*",
+    "packages/renderers/*",
+    "apps/*",
+    "registry/packs/*"
+  ],
+  "scripts": {
+    "build": "pnpm --filter @elicitkit/spec build && pnpm --filter @elicitkit/core build && pnpm --filter @elicitkit/renderers build && pnpm --filter @elicitkit/server build && pnpm --filter @elicitkit/http build && pnpm --filter @elicitkit/cli build && pnpm --filter @elicitkit/conformance build && pnpm --filter @elicitkit/pack-pr-review build && pnpm --filter @elicitkit/playground build",
+    "pack:plugin": "node scripts/pack-plugin.mjs",
+    "test": "pnpm build && pnpm --filter @elicitkit/core test && pnpm --filter @elicitkit/conformance test && pnpm --filter @elicitkit/server test && pnpm --filter @elicitkit/http test && pnpm --filter @elicitkit/cli test && pnpm --filter @elicitkit/pack-pr-review test"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^20.14.0",
+    "esbuild": "^0.28.0"
+  }
+}

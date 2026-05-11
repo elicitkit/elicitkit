@@ -1,0 +1,43 @@
+# Local notes
+/.planning/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+.turbo/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Coverage / test
+coverage/
+.nyc_output/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+.vscode/*
+!.vscode/extensions.json
+
+# local MCP wiring at repo root (machine-specific absolute paths).
+# Root-only — the plugin's own plugin/.mcp.json IS shipped.
+/.mcp.json
+
+# Local tool caches
+/.agents/
+/.claude/
+/skills-lock.json
