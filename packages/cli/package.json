@@ -1,0 +1,21 @@
+{
+  "name": "@elicitkit/cli",
+  "version": "0.1.0",
+  "description": "Elicitkit CLI — the shell-out reach. Pipe an AskSet in, get typed answers out; or render a panel to open in a browser.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "bin": { "elicitkit": "./dist/bin.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node test/smoke.mjs"
+  },
+  "dependencies": {
+    "@elicitkit/core": "workspace:*",
+    "@elicitkit/renderers": "workspace:*"
+  },
+  "publishConfig": { "access": "public" }
+}
