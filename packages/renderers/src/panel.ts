@@ -1,0 +1,639 @@
+import type { AskSet, Tier } from "@elicitkit/core";
+import { jsonForScript } from "./contract.js";
+
+/**
+ * The ONE canonical safe-color grammar — identical to the JSON Schema
+ * `safeColor` pattern, the conformance corpus, and SPEC §7.y. Accepts
+ * `#hex` (3/4/6/8), a CSS named/keyword color, and the common functional
+ * notations with a safe inner charset; it structurally cannot express
+ * `url(`, `var(`, `image-set(`, `element(`, gradients, quotes, `;`, or a
+ * nested `(` — i.e. no CSS value-injection / exfiltration / breakout. Held
+ * as a string so it round-trips through `jsonForScript` into the panel
+ * script with layer-proof escaping (regex literals in a template string
+ * mangle backslashes; a JSON string + `new RegExp` does not).
+ */
+export const SAFE_COLOR_PATTERN =
+  "^(?:#[0-9a-fA-F]{3,8}|[a-zA-Z]+|(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color)\\([0-9a-zA-Z.,%/ +\\-]*\\))$";
+export const SAFE_COLOR_RE = new RegExp(SAFE_COLOR_PATTERN);
+
+/**
+ * The shared interactive panel HTML used by the `apps` and `url` tiers (one
+ * source of truth for rich rendering). The DOM is built client-side from
+ * embedded JSON via textContent, so ask content can never inject markup.
+ * Icons are a curated, static inline-SVG set keyed by name — never sourced
+ * from ask content (unknown names fall back to textContent). Self-contained,
+ * dependency-free, CSP-safe (inline CSS/JS only).
+ *
+ * Display is progressively enhanced and fully backward-compatible:
+ *  - `set.meta.layout`: "auto" (default) | "single" | "grid"
+ *  - `ask.meta.span`:   "half" | "full"  (overrides the auto heuristic)
+ *  - `ask.spec.display` (ask_select): "list" | "cards" | "segmented" | "grid"
+ *  - `option.icon` / `option.color`: optional per-option adornments
+ * Older renderers ignore all of the above and still render correctly.
+ */
+export interface PanelOptions {
+  /** If set, the panel POSTs `{token,answers}` here (hosted url tier) in
+   *  addition to the mcp-ui postMessage + copy-paste fallbacks. */
+  submitUrl?: string;
+}
+
+export function buildPanelHtml(
+  set: AskSet,
+  token: string,
+  tier: Tier,
+  opts: PanelOptions = {},
+): string {
+  const asksJson = jsonForScript(set.asks);
+  const tokenJson = jsonForScript(token);
+  const tierJson = jsonForScript(tier);
+  const submitUrlJson = jsonForScript(opts.submitUrl ?? null);
+  const safeColorPatternJson = jsonForScript(SAFE_COLOR_PATTERN);
+
+  // Meta-CSP mirroring the proven-good header policy the hosted server sends
+  // (packages/http server.ts). The panel's own inline <style>/<script> is
+  // designed CSP-safe (no external/eval), so 'unsafe-inline' for style/script
+  // is sufficient and nothing else is needed. connect-src is the submit URL's
+  // ORIGIN when built with a submitUrl (the hosted/fetch round-trip path);
+  // otherwise 'none' (the data:/file/elicit_render copy-paste path makes no
+  // network calls). This is defence-in-depth for channels with no header CSP
+  // (mcp-ui rawHtml, data: URL, copy-paste); it must NOT regress the hosted
+  // /r/:token POST-back, hence connect-src = the submit origin there.
+  let connectSrc = "'none'";
+  if (opts.submitUrl) {
+    try {
+      connectSrc = new URL(opts.submitUrl).origin;
+    } catch {
+      connectSrc = "'none'";
+    }
+  }
+  const metaCsp =
+    "default-src 'none'; base-uri 'none'; form-action 'none'; " +
+    "img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
+    `connect-src ${connectSrc}`;
+  const metaCspAttr = metaCsp.replace(/"/g, "&quot;");
+  const setMeta = (set as { meta?: { layout?: string; theme?: string; accent?: string } }).meta ?? {};
+  const layoutJson = jsonForScript(setMeta.layout ?? "auto");
+  const themeJson = jsonForScript(setMeta.theme ?? "system");
+  const accentJson = jsonForScript(setMeta.accent ?? null);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="${metaCspAttr}" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: Canvas; --fg: CanvasText;
+    --line: color-mix(in srgb, var(--fg) 13%, transparent);
+    --soft: color-mix(in srgb, var(--fg) 4%, transparent);
+    --soft2: color-mix(in srgb, var(--fg) 7%, transparent);
+    --muted: color-mix(in srgb, var(--fg) 58%, transparent);
+    --accent: AccentColor;
+    --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+    --accent-line: color-mix(in srgb, var(--accent) 55%, var(--line));
+    --r: 14px; --r-sm: 10px;
+    --sp: 16px;
+    --shadow: 0 1px 2px color-mix(in srgb, CanvasText 8%, transparent),
+              0 8px 24px color-mix(in srgb, CanvasText 6%, transparent);
+  }
+  /* Skins (set.meta.theme). system = native light/dark; others fixed. */
+  [data-theme="midnight"] { --bg: #0b0e16; --fg: #e7e9ee; color-scheme: dark; }
+  [data-theme="paper"] { --bg: #faf7f0; --fg: #2a2722; color-scheme: light; }
+  [data-theme="high-contrast"] {
+    --bg: #000; --fg: #fff; --accent: #ffd400;
+    --line: color-mix(in srgb, var(--fg) 55%, transparent); color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+         margin: 0; padding: 34px 18px 124px; background: var(--bg); color: var(--fg);
+         -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 11px; margin: 0 0 26px; }
+  header .mark { font-size: 22px; color: var(--accent); }
+  header h1 { font-size: 18px; font-weight: 700; margin: 0; letter-spacing: -.015em; }
+  header .count { margin-left: auto; font-size: 12.5px; color: var(--muted);
+         padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; }
+  #f { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp); }
+  @media (max-width: 640px) { #f { grid-template-columns: 1fr; } }
+  .ask { background: var(--soft); border: 1px solid var(--line);
+         border-radius: var(--r); padding: 20px; min-width: 0;
+         transition: border-color .14s, box-shadow .14s; }
+  .ask.full { grid-column: 1 / -1; }
+  .ask:focus-within { border-color: var(--accent-line); box-shadow: var(--shadow); }
+  .prompt { font-weight: 650; font-size: 15.5px; margin: 0 0 3px; letter-spacing: -.01em; }
+  .req { color: color-mix(in srgb, #e00 70%, CanvasText); margin-left: 4px; }
+  .help { color: var(--muted); margin: 0 0 14px; font-size: 13.5px; }
+  .field { margin-top: 12px; }
+  textarea, input[type=text], input[type=number], input[type=date],
+  input[type=datetime-local] { width: 100%; font: inherit; padding: 10px 12px;
+         border-radius: var(--r-sm); border: 1px solid var(--line);
+         background: var(--bg); color: var(--fg); transition: border-color .12s, box-shadow .12s; }
+  textarea:focus, input:focus { outline: none; border-color: var(--accent);
+         box-shadow: 0 0 0 3px var(--accent-soft); }
+  textarea { resize: vertical; min-height: 80px; }
+  .ic { display: inline-flex; width: 18px; height: 18px; flex: none;
+        align-items: center; justify-content: center; }
+  .ic svg { width: 100%; height: 100%; }
+
+  /* option list (default) */
+  .opts { display: grid; gap: 8px; }
+  .opts.cards, .opts.grid2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  @media (max-width: 520px) { .opts.cards, .opts.grid2 { grid-template-columns: 1fr; } }
+  .opt { display: flex; gap: 11px; align-items: flex-start; padding: 11px 13px;
+         border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer;
+         background: var(--bg); transition: background .12s, border-color .12s, transform .06s; }
+  .opt:hover { background: var(--soft2); }
+  .opt:active { transform: translateY(1px); }
+  .opt:has(:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .opt:has(:focus-visible) { box-shadow: 0 0 0 3px var(--accent-soft); }
+  .opt input { margin: 2px 0 0; accent-color: var(--accent); flex: none; }
+  .opt .lbl { font-weight: 560; }
+  .opt small { display: block; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+  .opt .ic { margin-top: 1px; color: var(--accent); }
+  /* card variant: bigger hit area, icon on top, hidden native input */
+  .opts.cards .opt, .opts.grid2 .opt { flex-direction: column; gap: 8px; padding: 16px; }
+  .opts.cards .opt input, .opts.grid2 .opt input,
+  .opts.seg .opt input { position: absolute; opacity: 0; pointer-events: none; }
+  .opts.cards .opt .ic, .opts.grid2 .opt .ic { width: 22px; height: 22px; }
+  /* segmented variant */
+  .opts.seg { display: inline-flex; gap: 0; border: 1px solid var(--line);
+        border-radius: 999px; overflow: hidden; background: var(--bg); }
+  .opts.seg .opt { border: 0; border-radius: 0; padding: 8px 16px; background: transparent;
+        flex-direction: row; align-items: center; gap: 7px; }
+  .opts.seg .opt + .opt { border-left: 1px solid var(--line); }
+  .opts.seg .opt:has(:checked) { background: var(--accent); color: AccentColorText; }
+  .opts.seg .opt small { display: none; }
+
+  .swatch { width: 18px; height: 18px; border-radius: 5px; flex: none;
+        border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); }
+  .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip { width: 38px; height: 38px; border-radius: 9px; cursor: pointer;
+        border: 2px solid var(--line); transition: transform .08s, box-shadow .12s;
+        padding: 0; }
+  .chip:hover { transform: scale(1.08); }
+  .chip.on { border-color: CanvasText;
+        box-shadow: 0 0 0 3px var(--accent-soft); }
+
+  .file { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px;
+          font-weight: 600; margin: 14px 0 6px; color: var(--muted); }
+  .hunk { border: 1px solid var(--line); border-radius: var(--r-sm); margin: 10px 0;
+          overflow: hidden; }
+  .hunk-hdr { display: flex; justify-content: space-between; align-items: center;
+              gap: 10px; padding: 8px 12px; background: var(--soft2);
+              font-family: ui-monospace, monospace; font-size: 12px; }
+  pre { margin: 0; padding: 9px 12px; white-space: pre-wrap; font-size: 12.5px;
+        line-height: 1.5; font-family: ui-monospace, SFMono-Regular, monospace; }
+  pre.before { background: color-mix(in srgb, #d00 13%, transparent);
+        border-top: 1px solid var(--line); }
+  pre.after  { background: color-mix(in srgb, #090 14%, transparent); }
+  .seg { display: inline-flex; border-radius: 8px; overflow: hidden;
+         border: 1px solid var(--line); }
+  .seg button { font: inherit; font-size: 12.5px; padding: 5px 14px; cursor: pointer;
+                border: 0; background: var(--soft2); color: var(--fg); transition: .12s; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed=true] { background: var(--accent); color: AccentColorText;
+                font-weight: 600; }
+  .rrow { display: flex; justify-content: space-between; align-items: center;
+          gap: 10px; padding: 11px 13px; border: 1px solid var(--line);
+          border-radius: var(--r-sm); margin: 8px 0; background: var(--bg); }
+  .stars { display: inline-flex; gap: 4px; }
+  .stars button { font: inherit; font-size: 24px; line-height: 1; padding: 2px 4px;
+        border: 0; background: transparent; color: var(--muted); cursor: pointer;
+        transition: transform .08s, color .12s; }
+  .stars button:hover { transform: scale(1.15); }
+  .stars button.on { color: var(--accent); }
+  .slider { display: flex; align-items: center; gap: 14px; }
+  .slider input[type=range] { flex: 1; accent-color: var(--accent); }
+  .slider output { font-variant-numeric: tabular-nums; font-weight: 650;
+        min-width: 3ch; text-align: right; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+         display: flex; gap: 10px; justify-content: center;
+         padding: 14px; background: color-mix(in srgb, Canvas 86%, transparent);
+         backdrop-filter: blur(10px); border-top: 1px solid var(--line); }
+  .bar button { font: inherit; font-weight: 650; padding: 11px 26px;
+                border-radius: var(--r-sm); cursor: pointer; border: 0;
+                background: var(--accent); color: AccentColorText; transition: .12s; }
+  .bar button:hover { filter: brightness(1.07); }
+  .bar button:active { transform: translateY(1px); }
+  .bar button.ghost { background: transparent; color: var(--muted);
+                border: 1px solid var(--line); }
+  .bar button.ghost:hover { color: CanvasText; }
+  #copyout { grid-column: 1 / -1; background: var(--soft); border: 1px solid var(--line);
+             border-radius: var(--r); padding: 16px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important;
+        animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <span class="mark">‽</span>
+  <h1>Elicitkit needs your input</h1>
+  <span class="count" id="count"></span>
+</header>
+<form id="f">
+<div id="copyout" hidden>
+  <p style="margin:0 0 8px;font-weight:600">Copy this and paste it back to the assistant:</p>
+  <textarea id="payload" readonly rows="8"
+    style="width:100%;font-family:ui-monospace,monospace;font-size:12px;
+           border-radius:10px;padding:10px"></textarea>
+  <div style="margin-top:8px"><button type="button" id="copybtn"
+    style="font:inherit;font-weight:600;padding:8px 16px;border-radius:10px;
+           border:0;background:AccentColor;color:AccentColorText;cursor:pointer">Copy answers</button></div>
+</div>
+</form>
+</div>
+<div class="bar">
+  <button type="button" id="submit">Submit answers</button>
+  <button type="button" id="decline" class="ghost">Decline all</button>
+</div>
+<script>
+const ASKS = ${asksJson};
+const TOKEN = ${tokenJson};
+const PANEL_TIER = ${tierJson};
+const SUBMIT_URL = ${submitUrlJson};
+const LAYOUT = ${layoutJson};
+const THEME = ${themeJson};
+const ACCENT = ${accentJson};
+
+// Defence-in-depth: a CSS color sink guard. The schema already constrains
+// SelectOption.color / ask_color.palette / AskSet.meta.accent to this exact
+// grammar, but renderers MUST also ignore non-conforming values (SPEC §7.x)
+// so an unvalidated path can never reach a CSS url()/var()/image-set()
+// value-injection. The pattern is the ONE canonical safe-color grammar
+// (schema + sink guard + conformance + SPEC §7.y), injected as a JSON
+// string (layer-proof escaping) and reconstructed here: #hex(3/4/6/8), CSS
+// named/keyword colors, common functional notations with a safe inner
+// charset — structurally cannot express url(/var(/image-set(/element(/
+// gradients/quotes/;/nested (. Trimmed; empty/invalid ⇒ null ("no color",
+// omit), never throws.
+const SAFE_COLOR = new RegExp(${safeColorPatternJson});
+function safeColor(v) {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return SAFE_COLOR.test(t) ? t : null;
+}
+
+if (THEME && THEME !== "system")
+  document.documentElement.setAttribute("data-theme", THEME);
+const ACCENT_SAFE = safeColor(ACCENT);
+if (ACCENT_SAFE)
+  document.documentElement.style.setProperty("--accent", ACCENT_SAFE);
+const f = document.getElementById("f");
+const copyout = document.getElementById("copyout");
+const state = new Map();
+
+// Curated, STATIC inline-SVG icons. Keyed by name; values are our own
+// constants (safe for innerHTML). Anything not in here is treated as text.
+const P = "stroke='currentColor' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'";
+const SVG = (b) => "<svg viewBox='0 0 24 24' " + P + ">" + b + "</svg>";
+const ICONS = {
+  check: SVG("<path d='M20 6 9 17l-5-5'/>"),
+  x: SVG("<path d='M18 6 6 18M6 6l12 12'/>"),
+  warning: SVG("<path d='M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z'/>"),
+  info: SVG("<circle cx='12' cy='12' r='9'/><path d='M12 16v-4m0-4h.01'/>"),
+  rocket: SVG("<path d='M5 13c-1.5 1.5-2 5-2 5s3.5-.5 5-2m9-11a8 8 0 0 1-9 9l-3-3a8 8 0 0 1 9-9 6 6 0 0 1 3 3Z'/><circle cx='14.5' cy='9.5' r='1.5'/>"),
+  star: SVG("<path d='m12 3 2.7 5.5 6 .9-4.3 4.2 1 6L12 17l-5.4 2.6 1-6L3.3 9.4l6-.9Z'/>"),
+  bolt: SVG("<path d='M13 2 4 14h6l-1 8 9-12h-6l1-8Z'/>"),
+  clock: SVG("<circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 2'/>"),
+  shield: SVG("<path d='M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6l-7-3Z'/>"),
+  heart: SVG("<path d='M12 20s-7-4.3-9.3-8.2C1 9 2.5 5.5 6 5.5c2 0 3.2 1.2 6 4 2.8-2.8 4-4 6-4 3.5 0 5 3.5 3.3 6.3C19 15.7 12 20 12 20Z'/>"),
+  flag: SVG("<path d='M5 21V4m0 0 9 2-2 5 7 1-2 5-12-2'/>"),
+  leaf: SVG("<path d='M11 20A7 7 0 0 1 4 13C4 6 13 4 20 4c0 7-2 16-9 16Zm0 0c0-5 3-9 6-11'/>"),
+  sparkles: SVG("<path d='M12 3v6m0 6v6m-9-9h6m6 0h6M6 6l3 3m6 6 3 3m0-12-3 3M9 15l-3 3'/>"),
+};
+
+function icon(name) {
+  const s = document.createElement("span");
+  s.className = "ic";
+  if (typeof name === "string" && Object.prototype.hasOwnProperty.call(ICONS, name)) {
+    s.innerHTML = ICONS[name];          // our constant; never ask content
+  } else if (name) {
+    s.textContent = name;               // emoji / arbitrary char — inert
+  }
+  return s;
+}
+
+function el(tag, props, kids) {
+  const n = document.createElement(tag);
+  if (props) for (const k in props) {
+    if (k === "text") n.textContent = props[k];
+    else if (k === "html") { /* never used with ask content */ n.innerHTML = props[k]; }
+    else n.setAttribute(k, props[k]);
+  }
+  for (const c of kids || []) n.append(c);
+  return n;
+}
+
+function spanFull(ask) {
+  const m = ask.meta && ask.meta.span;
+  if (m === "full") return true;
+  if (m === "half") return false;
+  if (LAYOUT === "single") return true;
+  if (LAYOUT === "grid") { /* fall through to heuristic */ }
+  switch (ask.type) {
+    case "ask_code_diff": case "ask_rank": return true;
+    case "ask_text": return !!(ask.spec && ask.spec.multiline);
+    case "ask_select": {
+      const n = (ask.spec && ask.spec.options || []).length;
+      const d = ask.spec && ask.spec.display;
+      return d === "cards" || d === "grid" || !!(ask.spec && ask.spec.multiple) || n > 4;
+    }
+    case "ask_color": return (ask.spec && (ask.spec.palette || []).length || 0) > 6;
+    default: return false; // text(single), confirm, number, rating, slider, date
+  }
+}
+
+document.getElementById("count").textContent =
+  ASKS.length + (ASKS.length === 1 ? " question" : " questions");
+
+for (const ask of ASKS) {
+  const box = el("div", { class: "ask" + (spanFull(ask) ? " full" : "") });
+  const prompt = el("div", { class: "prompt", text: ask.prompt });
+  if (ask.required !== false) prompt.append(el("span", { class: "req", text: "*" }));
+  box.append(prompt);
+  if (ask.help) box.append(el("div", { class: "help", text: ask.help }));
+  const field = el("div", { class: "field" });
+  box.append(field);
+
+  if (ask.type === "ask_text") {
+    const big = ask.spec && ask.spec.multiline;
+    const inp = el(big ? "textarea" : "input", big ? { rows: "4" } : { type: "text" });
+    if (ask.spec && ask.spec.placeholder) inp.setAttribute("placeholder", ask.spec.placeholder);
+    field.append(inp);
+    state.set(ask.id, () => ({ status: inp.value ? "answered" : "declined", value: inp.value }));
+
+  } else if (ask.type === "ask_confirm") {
+    const aff = (ask.spec && ask.spec.affirm) || "Yes";
+    const den = (ask.spec && ask.spec.deny) || "No";
+    if (ask.spec && ask.spec.consequence)
+      box.insertBefore(el("div", { class: "help", text: ask.spec.consequence }),
+        field);
+    let v = null;
+    // consequence => big choice cards; otherwise a compact segmented control
+    if (ask.spec && ask.spec.consequence) {
+      const opts = el("div", { class: "opts cards" });
+      const mk = (label, val, ik) => {
+        const inp = el("input", { type: "radio", name: ask.id });
+        inp.onchange = () => { v = val; };
+        const lab = el("label", { class: "opt" }, [
+          inp, icon(ik), el("span", { class: "lbl", text: label }),
+        ]);
+        return lab;
+      };
+      opts.append(mk(aff, true, "check"), mk(den, false, "x"));
+      field.append(opts);
+    } else {
+      const seg = el("div", { class: "seg" });
+      const yes = el("button", { type: "button", text: aff });
+      const no = el("button", { type: "button", text: den });
+      yes.onclick = () => { v = true; yes.setAttribute("aria-pressed", "true"); no.setAttribute("aria-pressed", "false"); };
+      no.onclick = () => { v = false; yes.setAttribute("aria-pressed", "false"); no.setAttribute("aria-pressed", "true"); };
+      seg.append(yes, no);
+      field.append(seg);
+    }
+    state.set(ask.id, () => ({ status: v === null ? "declined" : "answered", value: v }));
+
+  } else if (ask.type === "ask_select") {
+    const multiple = !!(ask.spec && ask.spec.multiple);
+    const display = (ask.spec && ask.spec.display) || "list";
+    const cls = display === "cards" ? "opts cards"
+      : display === "grid" ? "opts grid2"
+      : display === "segmented" ? "opts seg" : "opts";
+    const wrap = el("div", { class: cls, role: multiple ? "group" : "radiogroup" });
+    const picks = new Set();
+    for (const o of ask.spec.options) {
+      const input = el("input", { type: multiple ? "checkbox" : "radio", name: ask.id, value: o.id });
+      input.onchange = () => {
+        if (multiple) { input.checked ? picks.add(o.id) : picks.delete(o.id); }
+        else { picks.clear(); picks.add(o.id); }
+      };
+      const body = el("div", {}, [el("span", { class: "lbl", text: o.label })]);
+      if (o.description && display !== "segmented")
+        body.append(el("small", { text: o.description }));
+      const kids = [input];
+      const oColor = safeColor(o.color);
+      if (oColor) {
+        const sw = el("span", { class: "swatch" }); sw.style.background = oColor;
+        kids.push(sw);
+      } else if (o.icon) kids.push(icon(o.icon));
+      kids.push(body);
+      wrap.append(el("label", { class: "opt" }, kids));
+    }
+    field.append(wrap);
+    state.set(ask.id, () => {
+      const arr = [...picks];
+      return { status: arr.length ? "answered" : "declined",
+               value: multiple ? arr : arr[0] };
+    });
+
+  } else if (ask.type === "ask_code_diff") {
+    const decisions = new Map();
+    for (const file of ask.spec.files) {
+      field.append(el("div", { class: "file", text: file.path }));
+      for (const h of file.hunks) {
+        decisions.set(h.id, true);
+        const acc = el("button", { type: "button", "aria-pressed": "true", text: "Accept" });
+        const rej = el("button", { type: "button", "aria-pressed": "false", text: "Reject" });
+        acc.onclick = () => { decisions.set(h.id, true);
+          acc.setAttribute("aria-pressed", "true"); rej.setAttribute("aria-pressed", "false"); };
+        rej.onclick = () => { decisions.set(h.id, false);
+          acc.setAttribute("aria-pressed", "false"); rej.setAttribute("aria-pressed", "true"); };
+        const hunk = el("div", { class: "hunk" }, [
+          el("div", { class: "hunk-hdr" }, [
+            el("span", { text: h.header || h.id }),
+            el("span", { class: "seg" }, [acc, rej]),
+          ]),
+        ]);
+        if (h.before) hunk.append(el("pre", { class: "before", text: h.before }));
+        hunk.append(el("pre", { class: "after", text: h.after }));
+        field.append(hunk);
+      }
+    }
+    state.set(ask.id, () => {
+      const accepted = [], rejected = [];
+      for (const [hid, ok] of decisions) (ok ? accepted : rejected).push(hid);
+      return { status: "answered", value: { accepted, rejected } };
+    });
+
+  } else if (ask.type === "ask_number") {
+    const s = ask.spec || {};
+    const inp = el("input", { type: "number" });
+    if (s.min != null) inp.setAttribute("min", s.min);
+    if (s.max != null) inp.setAttribute("max", s.max);
+    if (s.step != null) inp.setAttribute("step", s.step);
+    else if (s.integer) inp.setAttribute("step", "1");
+    if (s.unit) inp.setAttribute("placeholder", s.unit);
+    field.append(inp);
+    state.set(ask.id, () =>
+      inp.value === "" ? { status: "declined" }
+        : { status: "answered", value: Number(inp.value) });
+
+  } else if (ask.type === "ask_slider") {
+    const s = ask.spec;
+    const inp = el("input", { type: "range", min: s.min, max: s.max,
+      step: s.step != null ? s.step : "1", value: String(Math.round((s.min + s.max) / 2)) });
+    const out = el("output", { text: inp.value + (s.unit ? " " + s.unit : "") });
+    inp.oninput = () => { out.textContent = inp.value + (s.unit ? " " + s.unit : ""); };
+    field.append(el("div", { class: "slider" }, [inp, out]));
+    state.set(ask.id, () => ({ status: "answered", value: Number(inp.value) }));
+
+  } else if (ask.type === "ask_rating") {
+    const max = (ask.spec && ask.spec.max) || 5;
+    const numeric = ask.spec && ask.spec.icon === "number";
+    let val = 0;
+    const wrap = el("div", { class: "stars" });
+    const btns = [];
+    for (let i = 1; i <= max; i++) {
+      const b = el("button", { type: "button", "aria-label": "rate " + i,
+        text: numeric ? String(i) : "★" });
+      b.onclick = () => { val = i;
+        btns.forEach((x, j) => x.classList.toggle("on", j < i)); };
+      btns.push(b); wrap.append(b);
+    }
+    if (ask.spec && ask.spec.labels)
+      field.append(el("div", { class: "help",
+        text: (ask.spec.labels.min || "") + " → " + (ask.spec.labels.max || "") }));
+    field.append(wrap);
+    state.set(ask.id, () =>
+      val ? { status: "answered", value: val } : { status: "declined" });
+
+  } else if (ask.type === "ask_date") {
+    const inp = el("input", { type: ask.spec && ask.spec.time ? "datetime-local" : "date" });
+    if (ask.spec && ask.spec.min) inp.setAttribute("min", ask.spec.min);
+    if (ask.spec && ask.spec.max) inp.setAttribute("max", ask.spec.max);
+    field.append(inp);
+    state.set(ask.id, () =>
+      inp.value ? { status: "answered", value: inp.value } : { status: "declined" });
+
+  } else if (ask.type === "ask_rank") {
+    const order = ask.spec.items.map((it) => it.id);
+    const listEl = el("div", {});
+    const draw = () => {
+      listEl.textContent = "";
+      order.forEach((id, i) => {
+        const it = ask.spec.items.find((x) => x.id === id);
+        const up = el("button", { type: "button", text: "↑", "aria-label": "up" });
+        const dn = el("button", { type: "button", text: "↓", "aria-label": "down" });
+        up.disabled = i === 0; dn.disabled = i === order.length - 1;
+        up.onclick = () => { order.splice(i - 1, 0, order.splice(i, 1)[0]); draw(); };
+        dn.onclick = () => { order.splice(i + 1, 0, order.splice(i, 1)[0]); draw(); };
+        const body = el("div", {}, [el("span", { class: "lbl", text: (i + 1) + ". " + it.label })]);
+        if (it.description) body.append(el("small", { text: it.description }));
+        listEl.append(el("div", { class: "rrow" }, [body, el("span", { class: "seg" }, [up, dn])]));
+      });
+    };
+    draw();
+    field.append(listEl);
+    state.set(ask.id, () => ({ status: "answered", value: [...order] }));
+
+  } else if (ask.type === "ask_color") {
+    const s = ask.spec || {};
+    const palette = s.palette || [];
+    const allowCustom = palette.length === 0 || s.allowCustom === true;
+    let val = null;
+    const sw = el("div", { class: "swatches" });
+    const chips = [];
+    palette.forEach((rawC) => {
+      const c = safeColor(rawC);
+      if (!c) return; // non-conforming palette entry: skip the chip entirely
+      const b = el("button", { type: "button", "aria-label": c, title: c });
+      b.className = "chip"; b.style.background = c;
+      b.onclick = () => { val = c;
+        chips.forEach((x) => x.classList.remove("on")); b.classList.add("on");
+        if (custom) custom.value = /^#[0-9a-fA-F]{6}$/.test(c) ? c : custom.value; };
+      chips.push(b); sw.append(b);
+    });
+    field.append(sw);
+    let custom = null;
+    if (allowCustom) {
+      custom = el("input", { type: "color", value: palette[0] && /^#[0-9a-fA-F]{6}$/.test(palette[0]) ? palette[0] : "#888888" });
+      custom.style.cssText = "margin-top:10px;width:56px;height:34px;padding:2px;border-radius:8px;border:1px solid var(--line);background:Field;cursor:pointer";
+      custom.oninput = () => { val = custom.value;
+        chips.forEach((x) => x.classList.remove("on")); };
+      field.append(el("div", {}, [custom]));
+    }
+    state.set(ask.id, () =>
+      val ? { status: "answered", value: val } : { status: "declined" });
+
+  } else {
+    const inp = el("textarea", { rows: "3" });
+    field.append(inp);
+    state.set(ask.id, () => ({ status: inp.value ? "answered" : "declined", value: inp.value }));
+  }
+  f.insertBefore(box, copyout);
+}
+
+function collect(forceDecline) {
+  return ASKS.map((ask) => {
+    const r = forceDecline ? { status: "declined" } : state.get(ask.id)();
+    return { id: ask.id, type: ask.type, status: r.status,
+             value: r.status === "answered" ? r.value : undefined,
+             meta: { tier: PANEL_TIER, specVersion: ask.meta?.specVersion } };
+  });
+}
+
+function submit(answers) {
+  const params = { token: TOKEN, answers };
+  // Automatic path — ONLY for the apps tier, where the panel is rawHtml
+  // embedded by a trusting MCP-Apps/mcp-ui host (its documented contract).
+  // The token + answers must never be broadcast with targetOrigin "*" from
+  // the url tier: that panel ships as a null-origin data: URL and the
+  // hosted /r/ route is framable, so "*" would leak the one-time token and
+  // the user's answers to any embedding page. url uses SUBMIT_URL / copy.
+  if (PANEL_TIER === "apps") {
+    try {
+      window.parent.postMessage(
+        { type: "tool", payload: { toolName: "elicit_submit", params } },
+        "*",
+      );
+    } catch (e) { /* no controlling parent — fall through */ }
+  }
+
+  // Hosted path: a real POST back to the server (the hosted url tier).
+  if (SUBMIT_URL) {
+    fetch(SUBMIT_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(params),
+    }).then((res) => {
+      const bar = document.querySelector(".bar");
+      bar.innerHTML = res.ok
+        ? "<p style='font-weight:600'>Submitted — you can close this.</p>"
+        : "<p style='font-weight:600'>Server rejected the answers — see assistant.</p>";
+    }).catch(() => showCopy(params));
+    return;
+  }
+
+  // Always-works fallback (the defining 'url' channel): a copy-pasteable
+  // payload the user hands back to the assistant for elicit_submit.
+  if (PANEL_TIER === "url") showCopy(params);
+}
+
+function showCopy(params) {
+  const ta = document.getElementById("payload");
+  ta.value = JSON.stringify(params, null, 2);
+  copyout.hidden = false;
+  ta.focus(); ta.select();
+}
+
+const copyBtn = document.getElementById("copybtn");
+copyBtn.onclick = () => {
+  const ta = document.getElementById("payload");
+  ta.select();
+  (navigator.clipboard?.writeText(ta.value) ?? Promise.reject()).catch(() =>
+    document.execCommand("copy"));
+  copyBtn.textContent = "Copied";
+};
+
+document.getElementById("submit").onclick = () => submit(collect(false));
+document.getElementById("decline").onclick = () => submit(collect(true));
+// Lifecycle handshake is an apps-tier (mcp-ui host) concern only; carries
+// no token, but keep the "*" broadcast scoped to the trusted-embed tier.
+if (PANEL_TIER === "apps")
+  window.parent.postMessage({ type: "ui-lifecycle-iframe-ready" }, "*");
+</script>
+</body>
+</html>`;
+}
