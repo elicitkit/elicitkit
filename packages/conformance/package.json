@@ -1,0 +1,22 @@
+{
+  "name": "@elicitkit/conformance",
+  "version": "0.1.0",
+  "description": "The Elicitkit conformance suite — the source of truth for what \"Elicitkit-compliant\" means. A spec-derived fixture corpus + a portable runner any implementation points at.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./corpus": "./dist/corpus.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node test/smoke.mjs"
+  },
+  "devDependencies": {
+    "@elicitkit/core": "workspace:*"
+  },
+  "publishConfig": { "access": "public" }
+}

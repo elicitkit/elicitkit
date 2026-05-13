@@ -1,0 +1,10 @@
+{
+  "id": "pr-review",
+  "name": "PR Review",
+  "specVersion": "0.1.0",
+  "summary": "Per-hunk accept/reject of a pull request plus verdict, risk, and blocking concerns.",
+  "tags": ["code-review", "engineering", "ask_code_diff"],
+  "entry": "dist/index.js",
+  "builder": "buildPrReviewAskSet",
+  "license": "Apache-2.0"
+}

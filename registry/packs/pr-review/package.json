@@ -1,0 +1,19 @@
+{
+  "name": "@elicitkit/pack-pr-review",
+  "version": "0.1.0",
+  "description": "Elicitkit flagship pack — turn a pull request into a structured per-hunk review AskSet (the v0.1 wedge).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist", "pack.json"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node test/smoke.mjs"
+  },
+  "devDependencies": {
+    "@elicitkit/core": "workspace:*"
+  },
+  "publishConfig": { "access": "public" }
+}
