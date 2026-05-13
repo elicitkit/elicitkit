@@ -1,0 +1,31 @@
+# Elicitkit — runnable demos
+
+One question (`sample-askset.json`: per-hunk code-diff + multi-select + free
+text), shown through every surface. Build once, then run any demo:
+
+```sh
+pnpm build
+```
+
+| # | Run | Surface | Who it's for |
+|---|-----|---------|--------------|
+| 1 | `bash examples/1-cli.sh`   | **CLI**  | shell scripts / git hooks / deploy scripts — no AI, no server |
+| 2 | `bash examples/2-http.sh`  | **HTTP** | CI / n8n / backend jobs — web request in, signed link out, result back |
+| 3 | `node examples/3-mcp.mjs`  | **MCP**  | AI assistants (Claude Code, Cursor, Codex) — the v0.1 wedge |
+| 4 | `bash examples/4-browser.sh` | **the panel itself** | what the human actually clicks (`url` tier, standalone) |
+
+Each prints a narrated walkthrough. Demo 2 also shows the security envelope
+(one-time + forged-link rejection); demo 3 shows the *same* Ask resolving on
+two different client capabilities (rich panel vs. native elicitation) — the
+4-tier "works everywhere" point.
+
+### Wire the MCP server into a real AI client
+
+```jsonc
+// add to your MCP client config (Claude Code / Codex / Cursor)
+{ "command": "node",
+  "args": ["<repo>/packages/server/dist/bin.js"] }
+```
+
+Then ask the assistant to do something that needs your input — it calls the
+`elicit` tool itself.

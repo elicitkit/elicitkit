@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Elicitkit — rich, typed questions for AI agents</title>
+<style>
+  :root { color-scheme: light dark;
+    --line: color-mix(in srgb, CanvasText 14%, transparent);
+    --soft: color-mix(in srgb, CanvasText 5%, transparent);
+    --muted: color-mix(in srgb, CanvasText 58%, transparent);
+    --accent: AccentColor; }
+  * { box-sizing: border-box; }
+  body { font: 16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif;
+    margin: 0; background: Canvas; color: CanvasText; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 56px 22px 80px; }
+  h1 { font-size: 38px; letter-spacing: -.02em; margin: 0 0 6px; }
+  h1 .m { color: var(--accent); }
+  .tag { font-size: 18px; color: var(--muted); margin: 0 0 30px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin: 44px 0 14px; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); }
+  .card { background: var(--soft); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  code, pre { font-family: ui-monospace,SFMono-Regular,monospace; }
+  pre { background: var(--soft); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px; overflow:auto; font-size: 13px; }
+  .pills { display:flex; flex-wrap:wrap; gap:8px; }
+  .pill { border:1px solid var(--line); border-radius:999px;
+    padding:5px 12px; font-size:13px; }
+  .pill.on { background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border-color: var(--accent); }
+  iframe { width:100%; height:640px; border:1px solid var(--line);
+    border-radius:16px; background:Canvas; }
+  a { color: var(--accent); }
+  footer { margin-top:54px; color:var(--muted); font-size:13px;
+    border-top:1px solid var(--line); padding-top:18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Elicit<span class="m">‽</span>kit</h1>
+  <p class="tag">When an AI agent needs a real decision from you — not a
+    free-text guess. A portable spec, a reference implementation, and a
+    conformance suite for typed human input.</p>
+
+  <h2>One question, four ways to ask — works everywhere, breaks nowhere</h2>
+  <div class="grid">
+    <div class="card"><h3>apps</h3><p>Rich interactive panel embedded by an MCP-Apps / mcp-ui host.</p></div>
+    <div class="card"><h3>url</h3><p>The same panel as a self-contained link — copy-paste return, no server needed.</p></div>
+    <div class="card"><h3>elicitation</h3><p>The host's native MCP prompt — interactive in Claude Code / Codex.</p></div>
+    <div class="card"><h3>tui</h3><p>Plain text — the universal sink that never hard-fails.</p></div>
+  </div>
+
+  <h2>Three surfaces, one core</h2>
+  <div class="grid">
+    <div class="card"><h3>MCP server</h3><p>Any MCP client. <code>elicit</code> + <code>elicit_submit</code> tools; the server picks the best tier the client can actually render.</p></div>
+    <div class="card"><h3>HTTP</h3><p>CI / automation: <code>POST /elicit</code> → signed one-time link → answers back.</p></div>
+    <div class="card"><h3>CLI</h3><p>Shell-out: pipe an AskSet in, get validated JSON out.</p></div>
+  </div>
+
+  <h2>The catalog (v0.1 — 10 types)</h2>
+  <div class="pills">
+    <span class="pill on">ask_text</span><span class="pill on">ask_select</span>
+    <span class="pill on">ask_confirm</span><span class="pill on">ask_code_diff</span>
+    <span class="pill on">ask_number</span><span class="pill on">ask_rating</span>
+    <span class="pill on">ask_slider</span><span class="pill on">ask_date</span>
+    <span class="pill on">ask_rank</span><span class="pill on">ask_color</span>
+    <span class="pill">ask_table…</span><span class="pill">ask_form…</span>
+    <span class="pill">+ more — see ROADMAP</span>
+  </div>
+
+  <h2>Try it — this is the live renderer</h2>
+  <p class="tag">The panel below is real <code>@elicitkit/renderers</code>
+    output for a 9-type survey. Fill it, hit Submit → it shows the exact
+    typed JSON an agent receives.</p>
+  <iframe src="./panel.html" title="Elicitkit live panel"></iframe>
+
+  <h2>30 seconds in Claude Code</h2>
+<pre>pnpm build
+claude --plugin-dir ./plugin
+# then just ask: "Ask me which env to deploy to and whether to migrate."</pre>
+
+  <footer>
+    Apache-2.0 · the spec is the product · “Elicitkit-compliant” is whatever
+    the conformance suite says it is. See <a href="../../ROADMAP.md">ROADMAP</a>
+    and <a href="../../packages/spec/SPEC.md">SPEC</a>.
+  </footer>
+</div>
+</body>
+</html>

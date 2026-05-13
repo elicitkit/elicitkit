@@ -1,0 +1,14 @@
+{
+  "name": "@elicitkit/playground",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Elicitkit landing + live panel (the README/demo artifact). Static index.html; panel.html is regenerated from the real renderer.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@elicitkit/renderers": "workspace:*"
+  }
+}

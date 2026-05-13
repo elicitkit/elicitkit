@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://elicitkit.com/schema/v0.1",
+  "title": "Elicitkit Question Spec v0.1",
+  "description": "Draft. The reserved hooks (agentGuess/confidence/memoryKey) are inert in v0.1 and populated in a later MINOR.",
+  "$defs": {
+    "tier": { "enum": ["apps", "url", "elicitation", "tui"] },
+    "safeColor": {
+      "type": "string",
+      "description": "A CSS color constrained to a structurally safe grammar: #hex(3/4/6/8), a CSS named/keyword color, or a common functional notation with a safe inner charset. Structurally cannot express url(/var(/image-set(/element(/gradients/quotes/;/nested ( — no exfiltration or CSS breakout. Renderers MUST ignore (omit) any non-conforming value for these optional presentation fields.",
+      "pattern": "^(?:#[0-9a-fA-F]{3,8}|[a-zA-Z]+|(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color)\\([0-9a-zA-Z.,%/ +\\-]*\\))$"
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "specVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "minTier": { "$ref": "#/$defs/tier" },
+        "accent": { "$ref": "#/$defs/safeColor" }
+      },
+      "required": ["specVersion"],
+      "additionalProperties": true
+    },
+    "ask": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["ask_text", "ask_select", "ask_confirm", "ask_code_diff", "ask_number", "ask_rating", "ask_slider", "ask_date", "ask_rank", "ask_color"] },
+        "prompt": { "type": "string", "minLength": 1 },
+        "help": { "type": "string" },
+        "required": { "type": "boolean", "default": true },
+        "spec": { "type": "object" },
+        "agentGuess": {},
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "memoryKey": { "type": "string" },
+        "meta": { "$ref": "#/$defs/meta" }
+      },
+      "required": ["id", "type", "prompt", "spec"],
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "ask_select" } } },
+          "then": { "properties": { "spec": {
+            "type": "object",
+            "properties": {
+              "options": { "type": "array", "minItems": 1, "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "label": { "type": "string" },
+                  "description": { "type": "string" },
+                  "icon": { "type": "string" },
+                  "color": { "$ref": "#/$defs/safeColor" }
+                },
+                "required": ["id", "label"]
+              } },
+              "multiple": { "type": "boolean" },
+              "min": { "type": "integer" },
+              "max": { "type": "integer" },
+              "display": { "enum": ["list", "cards", "segmented", "grid"] }
+            },
+            "required": ["options"]
+          } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ask_code_diff" } } },
+          "then": { "properties": { "spec": {
+            "type": "object",
+            "properties": {
+              "files": { "type": "array", "minItems": 1, "items": {
+                "type": "object",
+                "properties": {
+                  "path": { "type": "string" },
+                  "hunks": { "type": "array", "minItems": 1, "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "string" },
+                      "header": { "type": "string" },
+                      "before": { "type": "string" },
+                      "after": { "type": "string" }
+                    },
+                    "required": ["id", "after"]
+                  } }
+                },
+                "required": ["path", "hunks"]
+              } },
+              "granularity": { "const": "hunk" }
+            },
+            "required": ["files"]
+          } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ask_number" } } },
+          "then": { "properties": { "spec": {
+            "type": "object",
+            "properties": {
+              "min": { "type": "number" },
+              "max": { "type": "number" },
+              "step": { "type": "number" },
+              "unit": { "type": "string" },
+              "integer": { "type": "boolean" }
+            }
+          } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ask_rating" } } },
+          "then": { "properties": { "spec": {
+            "type": "object",
+            "properties": {
+              "max": { "type": "integer", "minimum": 2 },
+              "icon": { "enum": ["star", "number"] },
+              "labels": { "type": "object", "properties": {
+                "min": { "type": "string" }, "max": { "type": "string" }
+              } }
+            }
+          } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ask_slider" } } },
+          "then": { "properties": { "spec": {
+            "type": "object",
+            "properties": {
+              "min": { "type": "number" },
+              "max": { "type": "number" },
+              "step": { "type": "number" },
+              "unit": { "type": "string" }
+            },
+            "required": ["min", "max"]
+          } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ask_date" } } },
+          "then": { "properties": { "spec": {
+            "type": "object",
+            "properties": {
+              "min": { "type": "string" },
+              "max": { "type": "string" },
+              "time": { "type": "boolean" }
+            }
+          } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ask_color" } } },
+          "then": { "properties": { "spec": {
+            "type": "object",
+            "properties": {
+              "palette": { "type": "array", "items": { "$ref": "#/$defs/safeColor" } },
+              "allowCustom": { "type": "boolean" }
+            }
+          } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ask_rank" } } },
+          "then": { "properties": { "spec": {
+            "type": "object",
+            "properties": {
+              "items": { "type": "array", "minItems": 2, "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "label": { "type": "string" },
+                  "description": { "type": "string" }
+                },
+                "required": ["id", "label"]
+              } }
+            },
+            "required": ["items"]
+          } } }
+        }
+      ]
+    },
+    "askSet": {
+      "type": "object",
+      "properties": {
+        "specVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "asks": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ask" } },
+        "edges": { "type": "array", "description": "RESERVED v0.1: conditional branching" },
+        "meta": {
+          "type": "object",
+          "description": "Optional AskSet-level presentation hints (advisory, forward-compatible). Unknown keys are preserved.",
+          "properties": {
+            "layout": { "type": "string" },
+            "theme": { "type": "string" },
+            "accent": { "$ref": "#/$defs/safeColor" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "required": ["specVersion", "asks"]
+    },
+    "answer": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "enum": ["answered", "declined", "deferred"] },
+        "value": {},
+        "meta": {
+          "type": "object",
+          "properties": {
+            "tier": { "$ref": "#/$defs/tier" },
+            "specVersion": { "type": "string" }
+          }
+        }
+      },
+      "required": ["id", "type", "status"]
+    }
+  },
+  "$ref": "#/$defs/askSet"
+}

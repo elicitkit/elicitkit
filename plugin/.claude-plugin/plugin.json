@@ -1,0 +1,9 @@
+{
+  "name": "elicitkit",
+  "description": "Ask the user rich, typed questions (catalog of 10 question types) instead of plain chat prompts — interactive in Claude Code via MCP elicitation.",
+  "version": "0.1.0",
+  "author": { "name": "the Elicitkit authors" },
+  "homepage": "https://elicitkit.com",
+  "repository": "https://github.com/elicitkit/elicitkit",
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,131 @@
+{
+  "specVersion": "0.1.0",
+  "meta": { "layout": "auto", "accent": "#7c3aed" },
+  "asks": [
+    {
+      "id": "title",
+      "type": "ask_text",
+      "prompt": "What should we call this release?",
+      "help": "One short line — shows up in the changelog.",
+      "spec": { "placeholder": "e.g. Spring hardening" },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "risk",
+      "type": "ask_select",
+      "prompt": "How risky is this change?",
+      "spec": {
+        "display": "cards",
+        "options": [
+          { "id": "low", "label": "Low", "description": "isolated, well-tested", "icon": "leaf" },
+          { "id": "med", "label": "Medium", "description": "touches shared code", "icon": "bolt" },
+          { "id": "high", "label": "High", "description": "auth / data / billing", "icon": "warning" }
+        ]
+      },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "envs",
+      "type": "ask_select",
+      "prompt": "Which environments ship first?",
+      "spec": {
+        "multiple": true,
+        "min": 1,
+        "display": "grid",
+        "options": [
+          { "id": "dev", "label": "Development", "icon": "rocket" },
+          { "id": "stg", "label": "Staging", "description": "mirrors prod data", "icon": "shield" },
+          { "id": "prod", "label": "Production", "icon": "flag" }
+        ]
+      },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "migrate",
+      "type": "ask_confirm",
+      "prompt": "Run the database migration as part of this deploy?",
+      "spec": { "affirm": "Run it", "deny": "Skip", "consequence": "Adds a non-null column with a backfill — irreversible without a restore." },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "patch",
+      "type": "ask_code_diff",
+      "prompt": "Approve these changes hunk by hunk",
+      "help": "Reject anything you are not comfortable shipping.",
+      "spec": {
+        "granularity": "hunk",
+        "files": [
+          {
+            "path": "src/auth.ts",
+            "hunks": [
+              { "id": "h1", "header": "@@ tighten the active check @@", "before": "if (user) {\n  return allow();\n}", "after": "if (user && user.active) {\n  return allow();\n}" },
+              { "id": "h2", "header": "@@ add audit log @@", "after": "logger.info('auth.granted', { uid: user.id });" }
+            ]
+          },
+          {
+            "path": "src/config.ts",
+            "hunks": [
+              { "id": "h3", "header": "@@ raise default timeout @@", "before": "timeout: 3000", "after": "timeout: 10000" }
+            ]
+          }
+        ]
+      },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "team",
+      "type": "ask_number",
+      "prompt": "How many engineers are on call for this?",
+      "spec": { "min": 1, "max": 12, "integer": true, "unit": "people" },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "confidence",
+      "type": "ask_rating",
+      "prompt": "How confident are you in this release?",
+      "spec": { "max": 5, "icon": "star", "labels": { "min": "shaky", "max": "rock solid" } },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "rollout",
+      "type": "ask_slider",
+      "prompt": "Initial traffic percentage for the canary?",
+      "spec": { "min": 0, "max": 100, "step": 5, "unit": "%" },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "target",
+      "type": "ask_date",
+      "prompt": "Target ship date?",
+      "spec": {},
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "priorities",
+      "type": "ask_rank",
+      "prompt": "Rank what matters most for this release",
+      "help": "Most important first.",
+      "spec": { "items": [
+        { "id": "speed", "label": "Ship speed" },
+        { "id": "safety", "label": "Safety / rollback", "description": "blast radius" },
+        { "id": "polish", "label": "UX polish" }
+      ] },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "brand",
+      "type": "ask_color",
+      "prompt": "Accent color for the release banner?",
+      "spec": { "palette": ["#1d4ed8", "#059669", "#d97706", "#dc2626", "#7c3aed"], "allowCustom": true },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "notes",
+      "type": "ask_text",
+      "prompt": "Release notes / anything for the on-call?",
+      "required": false,
+      "spec": { "multiline": true, "placeholder": "optional — markdown ok" },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    }
+  ]
+}

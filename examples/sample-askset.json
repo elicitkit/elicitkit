@@ -1,0 +1,44 @@
+{
+  "specVersion": "0.1.0",
+  "asks": [
+    {
+      "id": "patch",
+      "type": "ask_code_diff",
+      "prompt": "Apply this refactor to the auth guard?",
+      "help": "Reject any hunk you are not happy with.",
+      "spec": {
+        "granularity": "hunk",
+        "files": [
+          {
+            "path": "src/auth.ts",
+            "hunks": [
+              { "id": "h1", "header": "@@ tighten the active check @@", "before": "if (user) {\n  return allow();\n}", "after": "if (user && user.active) {\n  return allow();\n}" },
+              { "id": "h2", "header": "@@ add audit log @@", "after": "logger.info('auth.granted', { uid: user.id });" }
+            ]
+          }
+        ]
+      },
+      "meta": { "specVersion": "0.1.0", "minTier": "tui" }
+    },
+    {
+      "id": "envs",
+      "type": "ask_select",
+      "prompt": "Which environments should this ship to first?",
+      "spec": {
+        "multiple": true,
+        "options": [
+          { "id": "dev", "label": "Development" },
+          { "id": "stg", "label": "Staging", "description": "mirrors prod data" },
+          { "id": "prod", "label": "Production" }
+        ]
+      }
+    },
+    {
+      "id": "note",
+      "type": "ask_text",
+      "prompt": "Anything to flag for the reviewer?",
+      "required": false,
+      "spec": { "multiline": true, "placeholder": "optional" }
+    }
+  ]
+}

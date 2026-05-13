@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "elicitkit": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/elicitkit-server.mjs"]
+    }
+  }
+}
