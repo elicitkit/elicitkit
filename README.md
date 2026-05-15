@@ -1,5 +1,6 @@
 # Elicitkit ‽
 
+[![CI](https://github.com/elicitkit/elicitkit/actions/workflows/ci.yml/badge.svg)](https://github.com/elicitkit/elicitkit/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](./LICENSE)
 [![spec v0.1](https://img.shields.io/badge/spec-v0.1-informational.svg)](./packages/spec/SPEC.md)
 

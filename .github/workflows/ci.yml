@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test-conformance:
+    name: build · test · conformance gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # pnpm version is pinned via package.json "packageManager";
+          # Corepack provisions it. Cache the pnpm store keyed on the lockfile.
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm -r build
+
+      - name: Test
+        run: pnpm -r test
+
+      # The conformance suite is the gate: "Elicitkit-compliant" is whatever
+      # @elicitkit/conformance says it is. Its smoke run fails non-zero unless
+      # the reference impl is self-compliant (74/74) AND a permissive impl is
+      # correctly rejected — a non-green conformance therefore fails CI here.
+      - name: Conformance gate
+        run: pnpm --filter @elicitkit/conformance test
