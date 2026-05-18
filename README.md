@@ -27,36 +27,43 @@ It is a question-type vocabulary on top of MCP — it complements the MCP Apps e
 
 ## Quickstart
 
-### Claude Code plugin
+One prerequisite: **Node ≥ 20**. No clone, no absolute paths, no bundled binary, no Chrome.
 
-Bundled, self-contained MCP server + a trigger skill. From a clone of the repo, build once, then launch Claude Code with the plugin:
+### Add the MCP server to any MCP client
 
-```sh
-pnpm install && pnpm build
-claude --plugin-dir ./plugin
+Drop this one block anywhere a client takes MCP server config:
+
+```json
+{ "mcpServers": { "elicitkit": { "command": "npx", "args": ["-y", "@elicitkit/server"] } } }
 ```
 
-Verify with `/mcp` (server `elicitkit`, tools `elicit` + `elicit_submit`). Then ask for something that needs your input — e.g. *"Ask me which environments to deploy to and whether to run migrations."* In a terminal client the server uses native MCP elicitation, so questions are interactive and typed. See [`plugin/README.md`](./plugin/README.md) for packaging details.
+Same snippet, everywhere it goes. Where to paste it per client:
+
+- **Claude Code** — `claude plugin install elicitkit/elicitkit/plugin` (bundles the server + a trigger skill; no manual JSON needed).
+- **Codex CLI** — `codex mcp add elicitkit npx -- -y @elicitkit/server`.
+- **Cursor** — paste into MCP settings (`Settings → MCP`).
+- **Claude Desktop** — paste into `claude_desktop_config.json` under `mcpServers`.
+- **VS Code / Zed / Continue / Cline / Windsurf / …** — paste into the MCP config block in that client's settings; the shape is identical.
+
+Verify the server is wired (e.g. `/mcp` in Claude Code or `codex mcp get elicitkit`), then ask for something that needs your input — *"Ask me which environments to deploy to and whether to run migrations."* The agent calls the `elicit` tool itself; the host renders the question; typed answers come back.
 
 ### CLI (shell-out, no MCP)
 
 Pipe an `AskSet` in, get validated typed answers out (stdout is pure JSON; prompts go to stderr):
 
 ```sh
-cat examples/sample-askset.json | npx @elicitkit/cli ask /dev/stdin
+cat examples/sample-askset.json | npx -y @elicitkit/cli ask /dev/stdin
 # or render the url-tier panel to open in a browser:
-npx @elicitkit/cli render examples/sample-askset.json --out panel.html
+npx -y @elicitkit/cli render examples/sample-askset.json --out panel.html
 ```
 
-### From source
+### HTTP (any automation, no MCP)
 
 ```sh
-pnpm install
-pnpm -r build
-pnpm -r test     # must stay green, incl. @elicitkit/conformance
+npx -y @elicitkit/http   # POST /elicit · GET /r/:token · POST /elicit/submit · GET /health
 ```
 
-Prerequisites: **Node ≥ 20**, **pnpm** (pinned via `packageManager`; `corepack enable`).
+> **Pre-publish note (until v0.1.0 hits npm):** the canonical `npx -y @elicitkit/*` story above is the post-publish target state. Right now the equivalent dev path is `git clone https://github.com/elicitkit/elicitkit && pnpm install && pnpm -r build`, then point Claude Code at the bundled plugin with `claude --plugin-dir ./plugin`, or wire other clients to `node packages/server/dist/bin.js`. Once `@elicitkit/server`, `@elicitkit/cli`, and `@elicitkit/http` are published, the universal `npx -y` pattern takes over.
 
 ## Validated clients
 
@@ -71,10 +78,10 @@ Elicitkit is host-authoritative — the host owns the render surface; the server
 
 The locked first non-Claude validation target. Codex is a terminal MCP client, so Elicitkit lands on the **native elicitation tier**, host-authoritative — Codex owns the prompt surface, the server only advertises tiers and validates answers.
 
-**Wire it once** (uses the bundled self-contained server — no repo build needed beyond `pnpm build` for local source, or the published `@elicitkit/server` bin):
+Wire it once with the universal snippet:
 
 ```sh
-codex mcp add elicitkit -- node /ABSOLUTE/PATH/TO/elicitkit/plugin/server/elicitkit-server.mjs
+codex mcp add elicitkit npx -- -y @elicitkit/server
 codex mcp get elicitkit       # → enabled, transport: stdio
 ```
 
@@ -97,7 +104,7 @@ codex
 |---|---|
 | [`packages/spec`](./packages/spec) | **The product** — question-type vocabulary, JSON Schema, versioning ([`SPEC.md`](./packages/spec/SPEC.md)) |
 | `packages/core` | Type registry + validation + portable question model |
-| `packages/server` | MCP server — the reference implementation |
+| `packages/server` | MCP server — the reference implementation (`@elicitkit/server`) |
 | `packages/http` · `packages/cli` | Standalone HTTP/SDK + `npx` shell-out surfaces |
 | `packages/renderers/{apps,url,elicitation,tui}` | The 4-tier progressive fallback |
 | `packages/conformance` | The suite others run to claim compliance |

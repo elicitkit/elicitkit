@@ -21,11 +21,13 @@ two different client capabilities (rich panel vs. native elicitation) — the
 
 ### Wire the MCP server into a real AI client
 
-```jsonc
-// add to your MCP client config (Claude Code / Codex / Cursor)
-{ "command": "node",
-  "args": ["<repo>/packages/server/dist/bin.js"] }
+Same one-block config for every MCP client (Claude Code, Codex CLI, Cursor,
+Claude Desktop, VS Code, Zed, Continue, Cline, Windsurf, …):
+
+```json
+{ "mcpServers": { "elicitkit": { "command": "npx", "args": ["-y", "@elicitkit/server"] } } }
 ```
 
 Then ask the assistant to do something that needs your input — it calls the
-`elicit` tool itself.
+`elicit` tool itself. Pre-publish fallback (until `@elicitkit/server` is on
+npm): swap `npx`/`["-y", "@elicitkit/server"]` for `node`/`["<repo>/packages/server/dist/bin.js"]`.
