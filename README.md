@@ -65,6 +65,31 @@ Elicitkit is host-authoritative — the host owns the render surface; the server
 | Client | Status |
 |---|---|
 | **Claude Code** (v2.1.143) | ✅ verified — bundled plugin, native MCP elicitation tier |
+| **Codex CLI** (0.124.0) | ⚙️ MCP wiring verified; interactive round via runbook ([below](#codex-cli)) — the headless `codex exec` path cannot complete a human round (it cancels interactive MCP tool calls without a TTY) |
+
+### Codex CLI
+
+The locked first non-Claude validation target. Codex is a terminal MCP client, so Elicitkit lands on the **native elicitation tier**, host-authoritative — Codex owns the prompt surface, the server only advertises tiers and validates answers.
+
+**Wire it once** (uses the bundled self-contained server — no repo build needed beyond `pnpm build` for local source, or the published `@elicitkit/server` bin):
+
+```sh
+codex mcp add elicitkit -- node /ABSOLUTE/PATH/TO/elicitkit/plugin/server/elicitkit-server.mjs
+codex mcp get elicitkit       # → enabled, transport: stdio
+```
+
+**Drive an interactive round** (a TTY is required — Codex prompts you to approve the MCP tool call and then answers the elicitation; `codex exec` headless will *cancel* the call, so use the interactive client):
+
+```sh
+codex
+> Read examples/sample-askset.json and call the elicitkit `elicit` tool
+  with it as the askSet. Approve the call when prompted, then answer the
+  questions.
+```
+
+**What success looks like:** Codex requests approval for the `elicit` tool → after approval the server negotiates the `elicitation` tier and Codex renders the `ask_code_diff` (per-hunk accept/reject), then `ask_select`, then the optional `ask_text` as native one-at-a-time prompts → the tool returns a validated `Answer[]` (one per ask, `status: "answered" | "declined" | "deferred"`) with `_meta.elicitkit.renderedTier === "elicitation"`. No `elicit_submit` call is needed on this tier — answers resolve inline.
+
+> Verified to the tool boundary headlessly: `codex exec --json` discovers the server and invokes `elicit` with the exact `examples/sample-askset.json` AskSet, but the non-interactive client cancels the call (`"user cancelled MCP tool call"`) because the human elicitation step has no TTY. The interactive runbook above completes the round.
 
 ## Repo structure
 
