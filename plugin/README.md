@@ -16,13 +16,16 @@ bundled self-contained MCP server — no clone, no `pnpm install`, no
 build.
 
 Verify with `/mcp` (server `elicitkit`, tools `elicit` + `elicit_submit`)
-and `/help` (skill `elicitkit:elicit`). Then just ask for something that
-needs your input, e.g.:
+and `/help` (skill `elicitkit:elicit`). Then just prompt naturally for
+something that needs a real decision, e.g.:
 
-> Ask me which environment to deploy to and whether to run migrations.
+> Plan the next deploy with me.
 
-The skill nudges the model to call `elicit`; the server renders it
-interactively and returns typed answers.
+You don't write any JSON. The skill nudges the model to pick the right
+question types from your intent (pick environments → `ask_select`,
+migration confirm → `ask_confirm`, per-hunk review → `ask_code_diff`),
+compose them into an AskSet, and call `elicit`. The server renders it
+interactively and the model gets typed answers back.
 
 ## Dev / contributor fallback
 

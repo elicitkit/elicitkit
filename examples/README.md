@@ -1,4 +1,11 @@
-# Elicitkit — runnable demos
+# Elicitkit — integrator recipes
+
+**For agent builders / integrators wiring Elicitkit into a tool or agent.**
+End users never see this — your agent calls `elicit` on their behalf. They
+prompt naturally ("review this PR", "plan the deploy"); the agent composes
+the `AskSet` and dispatches it through one of these surfaces. The
+`*-askset.json` files here are integrator fixtures the recipes feed in,
+not something an end user ever writes.
 
 One question (`sample-askset.json`: per-hunk code-diff + multi-select + free
 text), shown through every surface. Build once, then run any demo:

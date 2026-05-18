@@ -11,6 +11,22 @@ When you need input from the user that has a **defined shape**, call the
 prose. It renders an interactive prompt and returns **typed, validated**
 answers — no parsing guesswork, and `declined`/`deferred` are explicit.
 
+**You compose the AskSet. Never ask the user to.** The user prompts you in
+plain language (e.g. *"review this PR"*, *"help me prioritize these
+features"*, *"plan the deploy"*); from that natural-language intent **you**
+pick the right `ask_*` types, fill in the `spec` fields, and call `elicit`
+with the AskSet. The user does not author JSON, does not see the AskSet,
+does not pick types — they only answer the rich question(s) the host
+renders.
+
+**Ask the minimum number of well-targeted questions.** Treat the user's
+attention as the budget: 3–8 sharp, decision-bearing questions is
+usually enough; 20 indirect ones is almost never the right answer.
+Before adding each Ask, ask yourself "would the wrong answer here
+actually change what I do next?" — if not, drop it. Prefer one
+high-leverage `ask_select` over four redundant `ask_text` follow-ups.
+Never instruct the user to write or edit JSON.
+
 ## How
 
 Call `elicit` with one argument, `askSet`:

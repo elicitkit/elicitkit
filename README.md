@@ -16,6 +16,16 @@ When an agent needs your input today, it gets one of two things: a wall of free 
 
 It is a question-type vocabulary on top of MCP — it complements the MCP Apps extension (SEP-1865), it does not compete with it. A type-aware client renders the real control; a dumb client falls back to `prompt` + free text. Same wire format either way.
 
+## Two audiences
+
+**End users — you prompt your agent in plain language. You never write JSON.**
+
+You're using an AI agent (Claude Code, Codex CLI, Cursor, …) that already has Elicitkit wired in. You ask in natural language — *"review this PR"*, *"help me prioritize these features"*, *"plan the deploy"*. The agent picks the right typed question(s) — per-hunk ✓/✗ on diffs, a slider, a rank, a date — composes them into an `AskSet`, and calls the `elicit` tool. You just answer the rich questions it presents. The skill that nudges the agent to do this lives at [`plugin/skills/elicit/SKILL.md`](./plugin/skills/elicit/SKILL.md).
+
+**Integrators / agent builders — wire Elicitkit into your agent's environment once.**
+
+Drop the universal MCP block into your client (below), or `claude plugin install elicitkit/elicitkit/plugin`, or call the HTTP/CLI surface directly. Your users prompt naturally; the agent composes the `AskSet` and calls `elicit`. Recipes for the MCP / HTTP / CLI surfaces are in [`examples/`](./examples). The end-user flow is: **(1)** their agent has Elicitkit wired in (you did this once); **(2)** they prompt naturally; **(3)** the agent presents typed questions; they answer; done.
+
 ## The pitch
 
 - **1 core, everywhere it goes.** One validator + portable question model (`@elicitkit/core`); every surface is a thin shell over it.
@@ -25,7 +35,9 @@ It is a question-type vocabulary on top of MCP — it complements the MCP Apps e
 - **Zero-drift.** The spec is the product; the server is its reference implementation; the JSON Schema is generated, not hand-kept. One source of truth, no spec/impl skew.
 - **The conformance suite is the standard.** "Elicitkit-compliant" is whatever `@elicitkit/conformance` says it is — a spec-derived fixture corpus + a portable runner any implementation points at. It has teeth: it rejects a permissive impl, and the reference server must pass its own suite.
 
-## Quickstart
+## Quickstart (integrators)
+
+For agent builders / tool integrators. End users never run any of this — their agent calls `elicit` on their behalf once you've wired the server in.
 
 One prerequisite: **Node ≥ 20**. No clone, no absolute paths, no bundled binary, no Chrome.
 
