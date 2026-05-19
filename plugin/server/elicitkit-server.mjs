@@ -33457,24 +33457,27 @@ ${ask.spec.consequence}` : msg(ask),
     }
     case "ask_select": {
       const s = ask.spec;
+      const branches = s.options.map((o) => ({ const: o.id, title: o.label }));
       const ids = s.options.map((o) => o.id);
-      const names = s.options.map((o) => o.label);
+      const descLines = s.options.filter((o) => !!o.description).map((o) => `- ${o.label}: ${o.description}`);
+      const message = descLines.length > 0 ? `${msg(ask)}
+
+${descLines.join("\n")}` : msg(ask);
       const r = await elicit({
-        message: msg(ask),
+        message,
         requestedSchema: {
           type: "object",
           properties: {
             value: s.multiple ? {
               type: "array",
               title: ask.prompt,
-              items: { type: "string", enum: ids },
+              items: { anyOf: branches },
               ...s.min ? { minItems: s.min } : {},
               ...s.max ? { maxItems: s.max } : {}
             } : {
               type: "string",
               title: ask.prompt,
-              enum: ids,
-              enumNames: names,
+              oneOf: branches,
               // Pre-select the first option so the native elicitation
               // form always carries a valid value — hitting submit
               // without touching the field no longer fails `required`.
@@ -33589,27 +33592,36 @@ ${h2.after}`,
     }
     case "ask_rank": {
       const items = ask.spec.items;
+      const branches = items.map((i) => ({ const: i.id, title: i.label }));
       const r = await elicit({
         message: `${msg(ask)}
 
-Rank by entering all ids, best first, comma-separated:
+Rank by listing every option in order, best first:
 ` + items.map((i) => `- ${i.id}: ${i.label}`).join("\n"),
         requestedSchema: {
           type: "object",
           properties: {
-            value: { type: "string", title: `e.g. ${items.map((i) => i.id).join(",")}` }
+            value: {
+              type: "array",
+              title: ask.prompt,
+              items: { anyOf: branches },
+              minItems: items.length,
+              maxItems: items.length
+            }
           },
           required: ["value"]
         }
       });
       if (r.action !== "accept")
         return answer(ask, statusFor(r.action));
-      const ordered = String(r.content?.value ?? "").split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+      const raw = r.content?.value;
+      const ordered = Array.isArray(raw) ? raw.map((x) => String(x)) : String(raw ?? "").split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
       return answer(ask, "answered", ordered);
     }
     case "ask_color": {
       const pal = ask.spec?.palette ?? [];
       const fixed = pal.length > 0 && ask.spec?.allowCustom !== true;
+      const branches = pal.map((c2) => ({ const: c2, title: c2 }));
       const r = await elicit({
         message: fixed ? msg(ask) : `${msg(ask)}
 
@@ -33618,7 +33630,7 @@ Suggested: ${pal.join(", ")}` : ""),
         requestedSchema: {
           type: "object",
           properties: {
-            value: fixed ? { type: "string", title: ask.prompt, enum: pal } : { type: "string", title: ask.prompt }
+            value: fixed ? { type: "string", title: ask.prompt, oneOf: branches } : { type: "string", title: ask.prompt }
           },
           required: ["value"]
         }
