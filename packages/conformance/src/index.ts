@@ -5,15 +5,31 @@ import {
   INVALID_ANSWERS,
   SEMANTIC,
   ELICITATION_RENDER,
+  INTEGRATION,
 } from "./corpus.js";
 
 export * from "./corpus.js";
+
+/** Per-tier rendering of an AskSet, as serialisable strings. The runner
+ *  substring-matches against each tier's expected tokens, so an impl may
+ *  return literal HTML for `apps`/`url`, the tui plaintext, and either
+ *  a single concatenated schema-blob or an array of per-ask schema blobs
+ *  for `elicitation` (the runner JSON-serialises anything non-string). */
+export interface TierRenderings {
+  apps?: unknown;
+  url?: unknown;
+  tui?: unknown;
+  elicitation?: unknown;
+}
 
 /** The minimal surface an implementation exposes to be checked. Only
  *  `validateAskSet` + `validateAnswer` are required; `validateAnswers`
  *  (set-aware: required/declined/deferred + per-type value) unlocks the
  *  set-aware tier. `renderElicitationAsk` is optional and exercises the
  *  elicitation-tier rendering contract (labels MUST reach the client).
+ *  `renderTiers` is the integration capstone — render the SAME AskSet
+ *  across all four tiers and assert every type/label surfaces in each
+ *  (the no-cross-type-drift guard at SPEC §6/§7).
  *  Shapes are intentionally tiny so any language can adapt. */
 export interface ConformanceTarget {
   validateAskSet(input: unknown): { ok: boolean };
@@ -25,6 +41,11 @@ export interface ConformanceTarget {
    *  schema — the runner serialises whatever is returned and substring-
    *  matches the expected labels, so labels may live in either place. */
   renderElicitationAsk?(askSet: unknown): unknown;
+  /** Optional: render the WHOLE AskSet across all four tiers. The
+   *  runner serialises each tier and substring-matches the integration
+   *  fixture's per-tier tokens — that is what "faithfully rendered
+   *  across all 4 tiers" means for a v0.1 implementation. */
+  renderTiers?(askSet: unknown): TierRenderings;
 }
 
 export interface CheckResult {
@@ -47,6 +68,7 @@ export interface ConformanceReport {
     answerEnvelope: boolean;
     answerSemantics: boolean;
     elicitationRender: boolean;
+    integration: boolean;
   };
 }
 
@@ -120,6 +142,56 @@ export function runConformance(target: ConformanceTarget): ConformanceReport {
     }
   }
 
+  // Integration: validate the showcase as a whole AND assert every type
+  // surfaces faithfully in every tier (no cross-type drift). ONE result
+  // per case — either the entire showcase round-trips through the four
+  // tiers or this row fails with the exact missing substrings. Opt-in:
+  // a target without renderTiers gets a skip-row noted as exercised=false
+  // (it still passes if validateAskSet accepts the showcase — the
+  // schema half of the contract — so absence of the renderer doesn't
+  // silently inflate the row count).
+  const hasRenderTiers = typeof target.renderTiers === "function";
+  for (const c of INTEGRATION) {
+    const wholeValid = target.validateAskSet(c.askSet).ok;
+    if (!wholeValid) {
+      rec(results, "integration", c.name, false,
+        `showcase AskSet rejected by validateAskSet (${c.note})`);
+      continue;
+    }
+    if (!hasRenderTiers) {
+      // Schema-only target: the integration row passes on the AskSet
+      // half (the rendering half is genuinely not exercised). Keep
+      // total stable so the count is deterministic across capability
+      // levels — the implementation will see exercised.integration=false.
+      rec(results, "integration", c.name, true,
+        `showcase AskSet validates; renderTiers not provided (${c.note})`);
+      continue;
+    }
+    const r = target.renderTiers!.bind(target);
+    let rendered: TierRenderings;
+    try {
+      rendered = r(c.askSet) ?? {};
+    } catch (e) {
+      rec(results, "integration", c.name, false,
+        `renderTiers threw: ${String(e)}`);
+      continue;
+    }
+    const ser = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v));
+    const tiers = ["apps", "url", "tui", "elicitation"] as const;
+    const missing: string[] = [];
+    for (const t of tiers) {
+      const blob = rendered[t] === undefined ? "" : ser(rendered[t]);
+      for (const s of c.mustIncludePerTier[t]) {
+        if (!blob.includes(s)) missing.push(`${t}:${s}`);
+      }
+    }
+    const ok = missing.length === 0;
+    rec(results, "integration", c.name, ok,
+      ok
+        ? `every type's labels/markers reached every tier (${c.note})`
+        : `cross-type drift — missing per-tier substrings: ${missing.join(", ")} (${c.note})`);
+  }
+
   const passed = results.filter((r) => r.ok).length;
   return {
     compliant: passed === results.length && results.length > 0,
@@ -131,6 +203,7 @@ export function runConformance(target: ConformanceTarget): ConformanceReport {
       answerEnvelope: true,
       answerSemantics: hasSetAware,
       elicitationRender: hasElicitRender,
+      integration: hasRenderTiers,
     },
   };
 }

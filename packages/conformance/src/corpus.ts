@@ -207,6 +207,103 @@ export const ELICITATION_RENDER: ElicitationRenderCase[] = [
   },
 ];
 
+// ── Integration: the all-10-types showcase, faithfully rendered everywhere
+// A single end-to-end fixture that the showcase AskSet — every v0.1 type
+// in one set — validates as a whole AND that every ask reaches the user
+// without cross-type drift in EACH of the four render tiers. A renderer
+// that quietly skipped (say) ask_color when a slider is also present, or
+// emitted ids-only for `ask_rank`, fails this fixture even if every
+// single-type test passes. The check is intentionally substring-based
+// (same hook style as ELICITATION_RENDER) so any language can adapt it.
+//
+// The fixture is ONE case → ONE row in the report (78th when the rest
+// of the corpus is healthy). A target opts in by providing the
+// `renderTiers` hook; without it, integration is skipped silently —
+// validateAskSet on the showcase is still part of the askSet group.
+export interface IntegrationCase {
+  name: string;
+  /** The AskSet to validate + render across all 4 tiers. */
+  askSet: unknown;
+  /** Per-tier substrings that MUST appear in the tier's rendering. The
+   *  same labels are expected to surface across tiers (cross-type-drift
+   *  guard); the lists are split per-tier in case a tier emits less
+   *  context (e.g. tui condenses; the runner unions them in practice). */
+  mustIncludePerTier: { apps: string[]; url: string[]; tui: string[]; elicitation: string[] };
+  note: string;
+}
+
+// The showcase AskSet: every v0.1 type, plus the ask_select display
+// variants and the ask_color custom/fixed split, expressed inline so the
+// corpus stays a portable single-file moat. Mirrors
+// examples/showcase-askset.json (kept in sync; tests assert overlap).
+const SHOWCASE_ASKSET = {
+  specVersion: "0.1.0",
+  meta: { layout: "auto", accent: "#7c3aed" },
+  asks: [
+    { id: "text_single", type: "ask_text", prompt: "Single-line text", help: "ask_text — auto half-width.", spec: { placeholder: "type here" }, meta: META },
+    { id: "text_multi", type: "ask_text", prompt: "Multiline text", help: "ask_text multiline — auto full-width.", required: false, spec: { multiline: true, placeholder: "longer answer…" }, meta: META },
+    { id: "sel_list", type: "ask_select", prompt: "Select — list (default)", spec: { options: [{ id: "a", label: "Alpha", description: "first option" }, { id: "b", label: "Bravo" }] }, meta: META },
+    { id: "sel_segmented", type: "ask_select", prompt: "Select — segmented", spec: { display: "segmented", options: [{ id: "lo", label: "Low" }, { id: "md", label: "Med" }, { id: "hi", label: "High" }] }, meta: META },
+    { id: "sel_cards", type: "ask_select", prompt: "Select — cards with icons", spec: { display: "cards", options: [{ id: "ship", label: "Ship", description: "deploy now", icon: "rocket" }, { id: "hold", label: "Hold", description: "needs review", icon: "clock" }, { id: "block", label: "Block", description: "do not merge", icon: "warning" }] }, meta: META },
+    { id: "sel_grid_multi", type: "ask_select", prompt: "Multi-select — grid, with color swatches", spec: { multiple: true, min: 1, display: "grid", options: [{ id: "red", label: "Critical", description: "P0", color: "#dc2626" }, { id: "amber", label: "Warning", description: "P1", color: "#d97706" }, { id: "green", label: "Healthy", description: "P2", color: "#059669" }] }, meta: META },
+    { id: "confirm_cards", type: "ask_confirm", prompt: "Confirm — with consequence", spec: { affirm: "Run migration", deny: "Skip", consequence: "Irreversible without a restore." }, meta: META },
+    { id: "num", type: "ask_number", prompt: "Number — bounded integer with unit", spec: { min: 1, max: 64, step: 1, integer: true, unit: "vCPU" }, meta: META },
+    { id: "rate_stars", type: "ask_rating", prompt: "Rating — stars with labels", spec: { max: 5, icon: "star", labels: { min: "poor", max: "great" } }, meta: META },
+    { id: "slider", type: "ask_slider", prompt: "Slider — 0–100 step 5", spec: { min: 0, max: 100, step: 5, unit: "%" }, meta: META },
+    { id: "date", type: "ask_date", prompt: "Date", spec: {}, meta: META },
+    { id: "rank", type: "ask_rank", prompt: "Rank — reorderable, with descriptions", spec: { items: [{ id: "speed", label: "Ship speed" }, { id: "safety", label: "Safety", description: "rollback / blast radius" }, { id: "polish", label: "UX polish" }] }, meta: META },
+    { id: "color_fixed", type: "ask_color", prompt: "Color — fixed palette only", spec: { palette: ["#1d4ed8", "#059669", "#d97706"] }, meta: META },
+    { id: "diff", type: "ask_code_diff", prompt: "Code diff — multi-file, per-hunk accept/reject", help: "ask_code_diff — always full-width; the v0.1 wedge.", spec: { granularity: "hunk", files: [{ path: "src/auth.ts", hunks: [{ id: "h1", header: "@@ tighten check @@", before: "if (user) {\n  return allow();\n}", after: "if (user && user.active) {\n  return allow();\n}" }] }] }, meta: META },
+  ],
+} as const;
+
+/** Public re-export so adopters can drive the same showcase through their
+ *  own renderTiers implementation without duplicating the fixture. */
+export const SHOWCASE = SHOWCASE_ASKSET;
+
+export const INTEGRATION: IntegrationCase[] = [
+  {
+    name: "showcase.all-10-types.no-cross-type-drift",
+    askSet: SHOWCASE_ASKSET,
+    note: "all 10 v0.1 types in one AskSet must validate AND each ask's labels/markers must reach every tier — no type silently dropped or rendered as another",
+    mustIncludePerTier: {
+      // apps/url emit the panel HTML (same buildPanelHtml under the hood);
+      // panel embeds the ask JSON, so type tokens AND option labels both
+      // surface in the serialized HTML.
+      apps: [
+        "ask_text", "ask_select", "ask_confirm", "ask_code_diff", "ask_number",
+        "ask_rating", "ask_slider", "ask_date", "ask_rank", "ask_color",
+        "Alpha", "Critical", "Ship speed", "#1d4ed8",
+      ],
+      url: [
+        "ask_text", "ask_select", "ask_confirm", "ask_code_diff", "ask_number",
+        "ask_rating", "ask_slider", "ask_date", "ask_rank", "ask_color",
+        "Alpha", "Critical", "Ship speed", "#1d4ed8",
+      ],
+      // tui prints `(ask_*)` per row plus enumerated option labels.
+      tui: [
+        "ask_text", "ask_select", "ask_confirm", "ask_code_diff", "ask_number",
+        "ask_rating", "ask_slider", "ask_date", "ask_rank", "ask_color",
+        "Alpha", "Critical", "Ship speed",
+      ],
+      // elicitation is per-ask; the runner concatenates each ask's
+      // schema+message into one blob, so type-specific tokens (titled
+      // oneOf labels, hunk ids, ask_confirm consequence text, color
+      // palette entries, ask_number unit) all land in the union. The
+      // ask_confirm primitive is boolean-only — affirm/deny labels do
+      // not reach the schema — so we match on the consequence text
+      // instead, which IS folded into the message body.
+      elicitation: [
+        "Alpha", "Critical", "Ship speed",       // labelled enum branches
+        "Irreversible without a restore.",       // ask_confirm consequence
+        "vCPU",                                  // ask_number unit
+        "#1d4ed8",                               // ask_color palette
+        "h1",                                    // ask_code_diff hunk id
+      ],
+    },
+  },
+];
+
 // ── Semantic cases for validateAnswers (required / declined / deferred) ─
 export interface SemanticCase {
   name: string;
