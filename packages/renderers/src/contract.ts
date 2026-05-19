@@ -20,15 +20,51 @@ export interface RenderedPanel {
 // property shapes the v0.1 type set needs. Kept here so renderers don't take
 // a direct @modelcontextprotocol/sdk dependency.
 
+/** A labelled enum branch: `const` carries the wire value, `title` is the
+ *  human-readable label the elicitation client shows. JSON-Schema-standard
+ *  "enum with labels" — codified by the MCP SDK as
+ *  TitledSingleSelectEnumSchema / TitledMultiSelectEnumSchema. Compliant
+ *  clients (Codex, Cursor, Claude Desktop, …) render `title`; the older
+ *  non-standard `enumNames` extension is silently dropped by most
+ *  clients, which is how users wound up seeing ids instead of labels. */
+export interface ElicitEnumBranch {
+  const: string;
+  title: string;
+}
+
 export type ElicitFormProperty =
-  | { type: "string"; title?: string; description?: string; maxLength?: number }
-  | { type: "boolean"; title?: string; description?: string; default?: boolean }
+  | {
+      type: "string";
+      title?: string;
+      description?: string;
+      maxLength?: number;
+      format?: string;
+    }
+  | {
+      type: "boolean";
+      title?: string;
+      description?: string;
+      default?: boolean;
+    }
+  | {
+      type: "number" | "integer";
+      title?: string;
+      description?: string;
+      minimum?: number;
+      maximum?: number;
+    }
+  | {
+      type: "string";
+      title?: string;
+      description?: string;
+      oneOf: ElicitEnumBranch[];
+      default?: string;
+    }
   | {
       type: "string";
       title?: string;
       description?: string;
       enum: string[];
-      enumNames?: string[];
       default?: string;
     }
   | {
@@ -37,7 +73,9 @@ export type ElicitFormProperty =
       description?: string;
       minItems?: number;
       maxItems?: number;
-      items: { type: "string"; enum: string[] };
+      items:
+        | { type: "string"; enum: string[] }
+        | { anyOf: ElicitEnumBranch[] };
     };
 
 export interface ElicitParams {

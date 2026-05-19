@@ -82,10 +82,26 @@ async function one(ask: Ask, elicit: ElicitFn): Promise<Answer> {
 
     case "ask_select": {
       const s = (ask as AskSelect).spec;
+      // Each option becomes a labelled enum branch: `const` carries the
+      // wire id, `title` carries the label the client renders. This is
+      // the JSON-Schema-standard "enum with labels" pattern, codified
+      // by the MCP SDK (TitledSingleSelectEnumSchema for single-pick,
+      // TitledMultiSelectEnumSchema for multi-pick). The previous
+      // `enum + enumNames` shape was a Mozilla-era extension that most
+      // clients silently drop — users saw ids ("q01_a") instead of
+      // labels ("A quiet beach"). Single-pick uses `oneOf`, multi-pick
+      // uses `anyOf` on `items` — those are the exact shapes the SDK
+      // accepts. Per-option description rides in the message body
+      // because the SDK schema strips `description` from enum branches.
+      const branches = s.options.map((o) => ({ const: o.id, title: o.label }));
       const ids = s.options.map((o) => o.id);
-      const names = s.options.map((o) => o.label);
+      const descLines = s.options
+        .filter((o) => !!o.description)
+        .map((o) => `- ${o.label}: ${o.description}`);
+      const message =
+        descLines.length > 0 ? `${msg(ask)}\n\n${descLines.join("\n")}` : msg(ask);
       const r = await elicit({
-        message: msg(ask),
+        message,
         requestedSchema: {
           type: "object",
           properties: {
@@ -93,15 +109,14 @@ async function one(ask: Ask, elicit: ElicitFn): Promise<Answer> {
               ? {
                   type: "array",
                   title: ask.prompt,
-                  items: { type: "string", enum: ids },
+                  items: { anyOf: branches },
                   ...(s.min ? { minItems: s.min } : {}),
                   ...(s.max ? { maxItems: s.max } : {}),
                 }
               : {
                   type: "string",
                   title: ask.prompt,
-                  enum: ids,
-                  enumNames: names,
+                  oneOf: branches,
                   // Pre-select the first option so the native elicitation
                   // form always carries a valid value — hitting submit
                   // without touching the field no longer fails `required`.
@@ -216,32 +231,54 @@ async function one(ask: Ask, elicit: ElicitFn): Promise<Answer> {
     }
 
     case "ask_rank": {
-      // No reorder UI in native elicitation (SPEC §7.9 degradation): collect
-      // the ids as an ordered comma list, then normalise to the array shape.
+      // No reorder UI in native elicitation (SPEC §7.9 degradation): emit
+      // a fixed-length labelled array so the user picks human-readable
+      // rows in their desired order — never bare ids. Uses the SDK's
+      // TitledMultiSelectEnumSchema shape (`items.anyOf` with const +
+      // title). minItems/maxItems pin the permutation length; clients
+      // that can only render a flat string still get labelled choices
+      // in the message text.
       const items = ask.spec.items;
+      const branches = items.map((i) => ({ const: i.id, title: i.label }));
       const r = await elicit({
         message:
-          `${msg(ask)}\n\nRank by entering all ids, best first, comma-separated:\n` +
+          `${msg(ask)}\n\nRank by listing every option in order, best first:\n` +
           items.map((i) => `- ${i.id}: ${i.label}`).join("\n"),
         requestedSchema: {
           type: "object",
           properties: {
-            value: { type: "string", title: `e.g. ${items.map((i) => i.id).join(",")}` },
+            value: {
+              type: "array",
+              title: ask.prompt,
+              items: { anyOf: branches },
+              minItems: items.length,
+              maxItems: items.length,
+            },
           },
           required: ["value"],
         },
       });
       if (r.action !== "accept") return answer(ask, statusFor(r.action));
-      const ordered = String(r.content?.value ?? "")
-        .split(/[,\s]+/)
-        .map((x) => x.trim())
-        .filter(Boolean);
+      // Accept either the proper array (compliant client) or a legacy
+      // comma-separated string (degraded client that only renders text).
+      const raw = r.content?.value;
+      const ordered = Array.isArray(raw)
+        ? raw.map((x) => String(x))
+        : String(raw ?? "")
+            .split(/[,\s]+/)
+            .map((x) => x.trim())
+            .filter(Boolean);
       return answer(ask, "answered", ordered);
     }
 
     case "ask_color": {
       const pal = ask.spec?.palette ?? [];
       const fixed = pal.length > 0 && ask.spec?.allowCustom !== true;
+      // For a fixed palette, the value *is* its own label (a CSS color
+      // string), but we still emit labelled `oneOf` branches so the
+      // elicitation shape is uniform with ask_select / ask_rank and a
+      // client that only knows the titled-enum shape can render it.
+      const branches = pal.map((c) => ({ const: c, title: c }));
       const r = await elicit({
         message: fixed
           ? msg(ask)
@@ -251,7 +288,7 @@ async function one(ask: Ask, elicit: ElicitFn): Promise<Answer> {
           type: "object",
           properties: {
             value: fixed
-              ? { type: "string", title: ask.prompt, enum: pal }
+              ? { type: "string", title: ask.prompt, oneOf: branches }
               : { type: "string", title: ask.prompt },
           },
           required: ["value"],

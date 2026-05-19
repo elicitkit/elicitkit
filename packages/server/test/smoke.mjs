@@ -152,17 +152,28 @@ assert.deepEqual(tools.map((t) => t.name).sort(), ["elicit", "elicit_render", "e
 
 // 7. Regression — ask_select over the elicitation tier carries a `default`,
 // so a user who submits the native form untouched still yields a valid id.
+// Also pins the Codex-CLI bug fix: option **labels** must reach the client
+// (as `oneOf[i].title`) so the user sees "Dev"/"Prod", not "dev"/"prod".
+// Per-option descriptions are folded into the message body because the
+// MCP SDK's TitledSingleSelectEnumSchema strips them from oneOf branches.
 {
   const selSet = {
     specVersion: "0.1.0",
     asks: [{ id: "env", type: "ask_select", prompt: "Env?",
-      spec: { options: [{ id: "dev", label: "Dev" }, { id: "prod", label: "Prod" }] },
+      spec: { options: [
+        { id: "dev", label: "Dev", description: "local sandbox" },
+        { id: "prod", label: "Prod" },
+      ] },
       meta: { specVersion: "0.1.0", minTier: "tui" } }],
   };
   let seenDefault;
+  let seenSchema;
+  let seenMessage;
   client.setRequestHandler(ElicitRequestSchema, async (req) => {
     const p = Object.values(req.params.requestedSchema.properties)[0];
     seenDefault = p.default;                 // server must pre-select option 1
+    seenSchema = p;
+    seenMessage = req.params.message;
     return { action: "accept", content: { value: p.default } };
   });
   const r = await client.callTool({
@@ -171,6 +182,76 @@ assert.deepEqual(tools.map((t) => t.name).sort(), ["elicit", "elicit_render", "e
   });
   assert.equal(seenDefault, "dev", "ask_select elicitation form pre-selects first option");
   assert.equal(r.structuredContent.answers[0].value, "dev");
+  // The Codex-CLI bug repro: the option labels must be visible in the
+  // emitted JSON Schema (as oneOf branch titles) — not just the ids.
+  // A regression here puts the user back to picking "dev/prod" by id.
+  const wire = JSON.stringify(seenSchema);
+  assert.ok(wire.includes("Dev"), "ask_select schema carries option label 'Dev'");
+  assert.ok(wire.includes("Prod"), "ask_select schema carries option label 'Prod'");
+  assert.ok(Array.isArray(seenSchema.oneOf), "ask_select uses oneOf for labelled enum");
+  assert.equal(seenSchema.oneOf[0].const, "dev");
+  assert.equal(seenSchema.oneOf[0].title, "Dev");
+  // Per-option description rides in the message (SDK strips it from
+  // oneOf branches), but still reaches the user verbatim.
+  assert.ok(
+    seenMessage.includes("local sandbox"),
+    "option description folded into message body",
+  );
+}
+
+// 7b. Regression — ask_select with `multiple: true` emits an array whose
+// items use labelled `anyOf` branches (the SDK's TitledMultiSelectEnum
+// shape), so multi-pick clients still show labels.
+{
+  const mSet = {
+    specVersion: "0.1.0",
+    asks: [{ id: "env", type: "ask_select", prompt: "Envs?",
+      spec: { multiple: true, min: 1, max: 2, options: [
+        { id: "dev", label: "Development" }, { id: "stg", label: "Staging" },
+      ] },
+      meta: { specVersion: "0.1.0", minTier: "tui" } }],
+  };
+  let seenProp;
+  client.setRequestHandler(ElicitRequestSchema, async (req) => {
+    seenProp = Object.values(req.params.requestedSchema.properties)[0];
+    return { action: "accept", content: { value: [seenProp.items.anyOf[0].const] } };
+  });
+  await client.callTool({ name: "elicit", arguments: { askSet: mSet, supportedTiers: ["elicitation", "tui"] } });
+  assert.equal(seenProp.type, "array");
+  assert.ok(Array.isArray(seenProp.items.anyOf), "multi-select items use labelled anyOf");
+  assert.equal(seenProp.items.anyOf[0].const, "dev");
+  assert.equal(seenProp.items.anyOf[0].title, "Development");
+  const blob = JSON.stringify(seenProp);
+  assert.ok(blob.includes("Development"), "multi ask_select carries label 'Development'");
+  assert.ok(blob.includes("Staging"), "multi ask_select carries label 'Staging'");
+}
+
+// 7c. Regression — ask_rank emits a fixed-length array of labelled
+// `anyOf` slots so the user reorders human-readable rows, not bare ids.
+{
+  const rkSet = {
+    specVersion: "0.1.0",
+    asks: [{ id: "rk", type: "ask_rank", prompt: "Priorities?",
+      spec: { items: [
+        { id: "p1", label: "Reduce churn" },
+        { id: "p2", label: "Ship onboarding" },
+      ] },
+      meta: { specVersion: "0.1.0", minTier: "tui" } }],
+  };
+  let seenProp;
+  client.setRequestHandler(ElicitRequestSchema, async (req) => {
+    seenProp = Object.values(req.params.requestedSchema.properties)[0];
+    return { action: "accept", content: { value: ["p2", "p1"] } };
+  });
+  const r = await client.callTool({ name: "elicit", arguments: { askSet: rkSet, supportedTiers: ["elicitation", "tui"] } });
+  assert.equal(seenProp.type, "array");
+  assert.equal(seenProp.minItems, 2);
+  assert.equal(seenProp.maxItems, 2);
+  assert.ok(Array.isArray(seenProp.items.anyOf), "ask_rank items use labelled anyOf");
+  const blob = JSON.stringify(seenProp);
+  assert.ok(blob.includes("Reduce churn"), "ask_rank carries label 'Reduce churn'");
+  assert.ok(blob.includes("Ship onboarding"), "ask_rank carries label 'Ship onboarding'");
+  assert.deepEqual(r.structuredContent.answers[0].value, ["p2", "p1"]);
 }
 
 // 8. The Claude-Code fix: a terminal client (no UI opt-in, no UI
@@ -183,7 +264,22 @@ assert.deepEqual(tools.map((t) => t.name).sort(), ["elicit", "elicit_render", "e
   const c2 = new Client({ name: "terminal", version: "0" }, { capabilities: { elicitation: {} } });
   c2.setRequestHandler(ElicitRequestSchema, async (req) => {
     const [key, p] = Object.entries(req.params.requestedSchema.properties)[0];
-    const v = p.type === "boolean" ? true : p.type === "array" ? [p.items.enum[0]] : p.enum ? p.enum[0] : "ok";
+    const firstId = (item) =>
+      Array.isArray(item.anyOf)
+        ? item.anyOf[0].const
+        : Array.isArray(item.oneOf)
+          ? item.oneOf[0].const
+          : item.enum?.[0];
+    const v =
+      p.type === "boolean"
+        ? true
+        : p.type === "array"
+          ? [firstId(p.items)]
+          : Array.isArray(p.oneOf)
+            ? p.oneOf[0].const
+            : p.enum
+              ? p.enum[0]
+              : "ok";
     return { action: "accept", content: { [key]: v } };
   });
   await c2.connect(c2t);
@@ -213,10 +309,18 @@ assert.deepEqual(tools.map((t) => t.name).sort(), ["elicit", "elicit_render", "e
     const [key, p] = Object.entries(req.params.requestedSchema.properties)[0];
     let v;
     if (p.type === "number" || p.type === "integer") v = p.minimum ?? 1;
+    else if (Array.isArray(p.oneOf)) v = p.oneOf[0].const;
     else if (p.enum) v = p.enum[0];
-    else if (p.format === "date") v = "2026-05-18";
+    else if (p.type === "array") {
+      // ask_rank: pick every labelled slot in declared order
+      const opts =
+        p.items.anyOf ??
+        p.items.oneOf ??
+        p.items.enum?.map((c) => ({ const: c })) ??
+        [];
+      v = opts.map((o) => o.const);
+    } else if (p.format === "date") v = "2026-05-18";
     else if (p.format === "date-time") v = "2026-05-18T09:30:00Z";
-    else if (p.title && p.title.includes(",")) v = p.title.replace("e.g. ", ""); // rank ids
     else v = "ok";
     return { action: "accept", content: { [key]: v } };
   });

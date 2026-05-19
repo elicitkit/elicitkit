@@ -38,6 +38,9 @@ importers:
       '@elicitkit/core':
         specifier: workspace:*
         version: link:../core
+      '@elicitkit/renderers':
+        specifier: workspace:*
+        version: link:../renderers
 
   packages/core:
     dependencies:

@@ -143,6 +143,70 @@ export const INVALID_ANSWERS: AnswerCase[] = [
   { ...a("ask_color", {}, 123), valid: false, note: "non-string color" },
 ];
 
+// ── Elicitation-tier rendering: option labels MUST reach the client ────
+// The reference renderer emits a JSON Schema for the native MCP
+// `elicitation/create` form, plus a free-text message. Some early
+// implementations only carried option **ids** (`enum: ["q01_a",
+// "q01_b"]`), so a compliant MCP client (Codex CLI was the first repro)
+// rendered "1. q01_a / 2. q01_b" instead of "1. A quiet beach / 2. A
+// rainy garden". The contract: for any Ask carrying human-readable
+// labels (ask_select options, ask_rank items), those label strings MUST
+// reach the user — either as enum-branch titles in the schema or in
+// the message body. Substring match is sufficient for the fixture; the
+// runner serialises message + schema and matches against the combined
+// payload, so an implementation may carry per-option descriptions in
+// either place.
+export interface ElicitationRenderCase {
+  name: string;
+  /** A single-Ask AskSet to render through the elicitation tier. */
+  askSet: unknown;
+  /** Substrings that MUST appear in message + serialized request schema. */
+  mustInclude: string[];
+  /** Substrings that MUST NOT appear (e.g. labels leaking as wire ids). */
+  mustExclude?: string[];
+  note: string;
+}
+
+export const ELICITATION_RENDER: ElicitationRenderCase[] = [
+  {
+    name: "ask_select.labels-surfaced",
+    note: "single-pick options must carry the option label, not just the id",
+    askSet: set(ask("ask_select", {
+      options: [
+        { id: "q01_a", label: "A quiet beach", description: "low tide, gulls" },
+        { id: "q01_b", label: "A rainy garden" },
+        { id: "q01_c", label: "A library nook" },
+      ],
+    })),
+    mustInclude: ["A quiet beach", "A rainy garden", "A library nook", "low tide, gulls"],
+  },
+  {
+    name: "ask_select.multiple.labels-surfaced",
+    note: "multi-pick: same label contract applies through items.anyOf",
+    askSet: set(ask("ask_select", {
+      multiple: true, min: 1, max: 2,
+      options: [
+        { id: "stack_node", label: "Node.js" },
+        { id: "stack_go", label: "Go" },
+        { id: "stack_rust", label: "Rust" },
+      ],
+    })),
+    mustInclude: ["Node.js", "Go", "Rust"],
+  },
+  {
+    name: "ask_rank.labels-surfaced",
+    note: "rank items must reach the user as human-readable rows",
+    askSet: set(ask("ask_rank", {
+      items: [
+        { id: "p1", label: "Reduce onboarding friction" },
+        { id: "p2", label: "Cut p95 latency" },
+        { id: "p3", label: "Ship the audit log" },
+      ],
+    })),
+    mustInclude: ["Reduce onboarding friction", "Cut p95 latency", "Ship the audit log"],
+  },
+];
+
 // ── Semantic cases for validateAnswers (required / declined / deferred) ─
 export interface SemanticCase {
   name: string;

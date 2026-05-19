@@ -16,7 +16,8 @@
     "test": "tsc -p tsconfig.json && node test/smoke.mjs"
   },
   "devDependencies": {
-    "@elicitkit/core": "workspace:*"
+    "@elicitkit/core": "workspace:*",
+    "@elicitkit/renderers": "workspace:*"
   },
   "publishConfig": { "access": "public" }
 }
