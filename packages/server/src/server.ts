@@ -1,11 +1,24 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { validateAskSet, type AskSet, type Tier } from "@elicitkit/core";
-import { runElicitation, buildPanelHtml, type ElicitFn } from "@elicitkit/renderers";
-import { negotiateTier, TIER_ORDER } from "./tiers.js";
+import { validateAskSet, type AskSet, type Tier, type Ask, type Answer } from "@elicitkit/core";
+import {
+  buildPanelHtml,
+  compileAskToInputs,
+  decodeAskAnswer,
+  type ElicitFn,
+  type ElicitParams,
+  type ElicitResult,
+} from "@elicitkit/renderers";
+import { negotiateTier, slowAskRoute, TIER_ORDER } from "./tiers.js";
 import { renderPanel } from "./render.js";
-import { closeRound, openRound } from "./submit.js";
+import {
+  appendCollected,
+  closeCollected,
+  closeRound,
+  openRound,
+  peekRoundState,
+} from "./submit.js";
 
 const TIER_VALUES = TIER_ORDER as readonly [Tier, ...Tier[]];
 
@@ -28,12 +41,16 @@ export interface ElicitServerOptions {
  *
  *  - `elicit`        — the agent submits an AskSet; the server validates it
  *                      against the v0.1 schema and negotiates the render tier
- *                      against the host's capabilities. Panel tiers (apps /
- *                      url / tui) return a rendering plus a round token;
- *                      answers come back later via `elicit_submit`. The
- *                      `elicitation` tier instead resolves *inline* against
- *                      the host's native MCP elicitation primitive and
- *                      returns the answers directly — no token, no submit.
+ *                      against the host's capabilities. EVERY tier returns
+ *                      fast: panel tiers (apps / url / tui) return a
+ *                      rendering plus a round token; the elicitation tier
+ *                      issues the FIRST native elicitInput inline, awaits
+ *                      ONE user answer, and returns `pending: true` so the
+ *                      per-call MCP timeout is never the gating factor.
+ *  - `elicit_next`   — NEW. Drives the next elicitInput for an open
+ *                      elicitation-tier round. Returns `pending:true`
+ *                      until the last ask is answered, then `pending:false`
+ *                      with the validated answers.
  *  - `elicit_submit` — the panel (or the agent, in `tui`/`url`) returns the
  *                      user's answers; validated per-type, handed back clean.
  *
@@ -46,8 +63,6 @@ export function createElicitServer(opts: ElicitServerOptions = {}): McpServer {
   });
 
   // Bridge the renderers' narrow ElicitFn to the SDK's elicitation primitive.
-  // The contract is a deliberate subset of MCP form-mode elicitation; the cast
-  // keeps renderers free of an SDK dependency.
   const elicit: ElicitFn = (params) =>
     server.server.elicitInput({
       mode: "form",
@@ -61,8 +76,13 @@ export function createElicitServer(opts: ElicitServerOptions = {}): McpServer {
       title: "Elicit structured input",
       description:
         "Render an Elicitkit AskSet to the user and obtain typed answers. " +
-        "Pass a v0.1 AskSet. Do not fabricate answers — they arrive from the " +
-        "user (via elicit_submit, or inline for the elicitation tier).",
+        "Returns FAST: panel tiers return a token + rendering; the " +
+        "elicitation tier issues ONE native prompt inline and returns " +
+        "`pending:true` so the per-call MCP timeout is never blown by " +
+        "human-think time. If `pending:true` and tier === 'elicitation', " +
+        "call `elicit_next(token)` until `pending:false`; otherwise " +
+        "collect answers per the rendering and call " +
+        "`elicit_submit(token, answers)`. Never fabricate answers.",
       inputSchema: {
         askSet: z
           .unknown()
@@ -127,32 +147,62 @@ export function createElicitServer(opts: ElicitServerOptions = {}): McpServer {
         hostTiers.add("url");
       }
 
+      // Slow-ask auto-router: if any ask in the set is likely-slow on the
+      // per-prompt elicitation primitive (long text, big code diff, large
+      // rank), drop `elicitation` from the candidates so we degrade to a
+      // panel tier (apps/url) where the user can take as long as they
+      // want, or to tui where the agent collects the answers in chat.
+      const slow = slowAskRoute(set);
+      const candidates = new Set(hostTiers);
+      if (slow.routed) candidates.delete("elicitation");
+
       // The agent's supportedTiers may only NARROW within the host's real
       // set — it can't grant a tier the host can't do. If its narrowing
       // leaves nothing, ignore it and trust the host.
-      let effective: Tier[] = [...hostTiers];
+      let effective: Tier[] = [...candidates];
       const requested = supportedTiers as Tier[] | undefined;
       if (requested && requested.length > 0) {
         const r = new Set(requested);
         const narrowed = effective.filter((t) => r.has(t));
         if (narrowed.length > 0) effective = narrowed;
       }
+      // If filtering / routing emptied the set, fall back to the universal
+      // sink so we never hard-fail at negotiation.
+      if (effective.length === 0) effective = ["tui"];
       const { tier, negotiated } = negotiateTier(set, effective);
 
-      // elicitation tier: resolve inline against the native primitive.
+      const baseMeta: Record<string, unknown> = {
+        renderedTier: tier,
+        tierNegotiated: negotiated,
+        hostTiers: [...hostTiers],
+        ...(slow.routed
+          ? { routedAwayFromElicitation: true, routeReason: slow.reason }
+          : {}),
+      };
+
+      // ── elicitation tier: open round, issue FIRST elicitInput inline,
+      // await ONE answer, return pending:true. The rest of the round is
+      // driven by elicit_next so each tool call is bounded by one user
+      // answer (a Codex-realistic 14-question set never trips a per-call
+      // MCP timeout).
       if (tier === "elicitation") {
-        const answers = await runElicitation(set, elicit);
-        return {
-          content: [{ type: "text", text: JSON.stringify(answers, null, 2) }],
-          structuredContent: { answers },
-          _meta: {
-            elicitkit: { renderedTier: "elicitation", tierNegotiated: negotiated, inline: true, clientElicitation, hostTiers: [...hostTiers] },
-          },
-        };
+        const token = openRound(set, { tier: "elicitation" });
+        const out = await driveOneStep(token, elicit);
+        if (!out.ok) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: out.error }],
+          };
+        }
+        return out.result(token, baseMeta);
       }
 
-      // panel tiers: render + hand back a round token for elicit_submit.
-      const token = openRound(set);
+      // ── panel tiers (tui/url/apps): return panel ref + token IMMEDIATELY,
+      // no await. The user fills the panel; the agent calls elicit_submit.
+      const token = openRound(set, {
+        tier,
+        ...(slow.routed ? { routedAwayFromElicitation: { reason: slow.reason ?? "" } } : {}),
+      });
       const out = await renderPanel(set, tier, token);
 
       const content: CallToolResult["content"] = [
@@ -164,17 +214,81 @@ export function createElicitServer(opts: ElicitServerOptions = {}): McpServer {
 
       return {
         content,
+        structuredContent: {
+          pending: true,
+          token,
+          tier,
+          ...(tier === "url" || tier === "apps"
+            ? { panelUri: out.ui?.resource.uri }
+            : {}),
+        },
         _meta: {
           elicitkit: {
             token,
+            pending: true,
+            ...baseMeta,
             renderedTier: out.tier,
             requestedTier: tier,
-            tierNegotiated: negotiated,
-            hostTiers: [...hostTiers],
+            ...(out.ui ? {} : {}),
           },
           ...(out.ui ? { ui: { resourceUri: out.ui.resource.uri } } : {}),
         },
       };
+    },
+  );
+
+  server.registerTool(
+    "elicit_next",
+    {
+      title: "Advance an open elicitation-tier round",
+      description:
+        "Drive the next native elicitInput for an open elicitation-tier " +
+        "round. Returns `pending:true` (more asks to come) or " +
+        "`pending:false` with the validated `answers`. Only valid for the " +
+        "elicitation tier — panel tiers (tui/url/apps) complete via " +
+        "elicit_submit instead.",
+      inputSchema: {
+        token: z
+          .string()
+          .describe("The round token from a prior elicit / elicit_next result."),
+      },
+    },
+    async ({ token }): Promise<CallToolResult> => {
+      const st = peekRoundState(token);
+      if (!st) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "unknown or expired token" }],
+        };
+      }
+      if (st.tier !== "elicitation") {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text:
+                `round token is for tier ${st.tier}; use elicit_submit instead`,
+            },
+          ],
+        };
+      }
+      if (st.index >= st.set.asks.length) {
+        return {
+          isError: true,
+          content: [
+            { type: "text", text: "round already complete; no more asks" },
+          ],
+        };
+      }
+      const out = await driveOneStep(token, elicit);
+      if (!out.ok) {
+        return { isError: true, content: [{ type: "text", text: out.error }] };
+      }
+      return out.result(token, {
+        renderedTier: "elicitation",
+        hostTiers: [],
+      });
     },
   );
 
@@ -214,8 +328,8 @@ export function createElicitServer(opts: ElicitServerOptions = {}): McpServer {
       }
       return {
         content: [{ type: "text", text: JSON.stringify(r.answers, null, 2) }],
-        structuredContent: { answers: r.answers },
-        _meta: { elicitkit: { token, ok: true } },
+        structuredContent: { answers: r.answers, pending: false },
+        _meta: { elicitkit: { token, ok: true, pending: false } },
       };
     },
   );
@@ -260,7 +374,7 @@ export function createElicitServer(opts: ElicitServerOptions = {}): McpServer {
       const set = askSet as AskSet;
       // A real round token so the panel's copy-paste payload validates
       // through elicit_submit just like any other round.
-      const token = openRound(set);
+      const token = openRound(set, { tier: "url" });
       const html = buildPanelHtml(set, token, "url");
       return {
         content: [
@@ -281,4 +395,161 @@ export function createElicitServer(opts: ElicitServerOptions = {}): McpServer {
   );
 
   return server;
+}
+
+// ── elicitation-tier step driver ─────────────────────────────────────────
+// Runs ONE elicitInput against the host: either the next sub-step of the
+// current ask (e.g. the next hunk for an in-progress ask_code_diff) or the
+// first sub-step of the next ask. On a non-accept result the ask is
+// finalised via decodeAskAnswer (with whatever sub-steps were collected),
+// the round advances, and either the next ask is queued or the round
+// closes. The function returns a tagged union the calling tool handler
+// turns into a CallToolResult.
+
+type StepOk = {
+  ok: true;
+  result: (token: string, extraMeta: Record<string, unknown>) => CallToolResult;
+};
+type StepErr = { ok: false; error: string };
+type StepOut = StepOk | StepErr;
+
+async function driveOneStep(token: string, elicit: ElicitFn): Promise<StepOut> {
+  const st = peekRoundState(token);
+  if (!st) return { ok: false, error: "unknown or expired token" };
+
+  const stateAny = st as unknown as {
+    set: AskSet;
+    index: number;
+    collected: Answer[];
+    subResponses?: ElicitResult[];
+  };
+  if (!stateAny.subResponses) stateAny.subResponses = [];
+
+  const askIdx = stateAny.index;
+  const ask = stateAny.set.asks[askIdx];
+  if (!ask) {
+    return { ok: false, error: "round already complete; no more asks" };
+  }
+
+  const inputs = compileAskToInputs(ask as Ask);
+  const subStep = stateAny.subResponses.length;
+  const params: ElicitParams | undefined = inputs[subStep];
+  if (!params) {
+    return { ok: false, error: "no elicitInput compiled for ask" };
+  }
+
+  const r = await elicit(params);
+  stateAny.subResponses.push(r);
+
+  // For ask_code_diff, a non-accept on any hunk ends the ask. For other
+  // asks there's only one input anyway.
+  const moreSubSteps = inputs.length > stateAny.subResponses.length;
+  const continueAsk =
+    moreSubSteps && (ask.type !== "ask_code_diff" || r.action === "accept");
+
+  if (continueAsk) {
+    // Still inside the current ask. Return pending:true with progress.
+    return {
+      ok: true,
+      result: (tok, extra) =>
+        ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                { pending: true, token: tok, completed: stateAny.index, total: stateAny.set.asks.length },
+                null,
+                2,
+              ),
+            },
+          ],
+          structuredContent: {
+            pending: true,
+            token: tok,
+            tier: "elicitation",
+            completed: stateAny.index,
+            total: stateAny.set.asks.length,
+          },
+          _meta: {
+            elicitkit: {
+              token: tok,
+              pending: true,
+              completed: stateAny.index,
+              total: stateAny.set.asks.length,
+              ...extra,
+            },
+          },
+        }) satisfies CallToolResult,
+    };
+  }
+
+  // The ask is done — decode its accumulated responses into an Answer.
+  const answer = decodeAskAnswer(ask as Ask, stateAny.subResponses);
+  const counters = appendCollected(token, answer)!;
+  stateAny.subResponses = [];
+
+  if (counters.completed < counters.total) {
+    return {
+      ok: true,
+      result: (tok, extra) =>
+        ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                { pending: true, token: tok, completed: counters.completed, total: counters.total },
+                null,
+                2,
+              ),
+            },
+          ],
+          structuredContent: {
+            pending: true,
+            token: tok,
+            tier: "elicitation",
+            completed: counters.completed,
+            total: counters.total,
+          },
+          _meta: {
+            elicitkit: {
+              token: tok,
+              pending: true,
+              completed: counters.completed,
+              total: counters.total,
+              ...extra,
+            },
+          },
+        }) satisfies CallToolResult,
+    };
+  }
+
+  // Last ask — finalise the round.
+  const final = closeCollected(token);
+  if (!final.ok) {
+    return {
+      ok: false,
+      error: "Answers rejected — re-ask (SPEC.md §5):\n- " + final.errors.join("\n- "),
+    };
+  }
+  return {
+    ok: true,
+    result: (tok, extra) =>
+      ({
+        content: [{ type: "text", text: JSON.stringify(final.answers, null, 2) }],
+        structuredContent: {
+          pending: false,
+          token: tok,
+          tier: "elicitation",
+          answers: final.answers,
+        },
+        _meta: {
+          elicitkit: {
+            token: tok,
+            pending: false,
+            inline: true,
+            ...extra,
+          },
+        },
+      }) satisfies CallToolResult,
+  };
 }

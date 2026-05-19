@@ -53,6 +53,35 @@ A type-aware renderer reads `type` + `spec`; a dumb renderer can always fall bac
 - The host advertises `supportedTiers`. The server picks the **richest tier ≥ the Ask's `meta.minTier`** that the host supports.
 - Every type MUST define behaviour for **all four** tiers (degradation is part of the type definition, not an afterthought). A type that cannot degrade below `url` MUST set `minTier: "url"` and provide a text-summary fallback so it never hard-fails.
 
+### 4.1 Non-blocking contract (uniform across tiers)
+
+Every elicit tool call MUST return in less than the host's per-call MCP timeout (≪ 1 s server-side, bounded by **one** user answer at most on the elicitation tier). This is achieved by surfacing a **pending envelope** the agent drives forward across multiple tool calls:
+
+| Tool | Behaviour |
+|---|---|
+| `elicit(askSet, supportedTiers?)` | Returns fast. Shape: `{ pending: true, token, tier, ...tierContext }` with `_meta.elicitkit` carrying `renderedTier`, `hostTiers`, and (when the slow-ask auto-router fires) `routedAwayFromElicitation: true` plus a `routeReason`. The elicitation tier issues the FIRST native `elicitInput` inline and awaits ONE answer before returning. |
+| `elicit_next(token)` | **Elicitation tier only.** Issues the next `elicitInput`, awaits one user answer, returns `{ pending: true, token, completed, total }` or final `{ pending: false, answers }`. Other tiers complete via `elicit_submit` instead. |
+| `elicit_submit(token, answers)` | Panel tiers (`tui` / `url` / `apps`). Validates and completes the round. |
+
+Per-tier flow:
+
+- **tui** — `elicit` returns AskSet + token; agent presents in chat; agent calls `elicit_submit`.
+- **elicitation** — `elicit` opens the round, fires `elicitInput` for ask 1, awaits ONE answer, returns `{ pending, token, completed: 1, total: N }`. Agent calls `elicit_next(token)` per remaining ask. The final call returns `{ pending: false, answers }`.
+- **url** — `elicit` returns `{ pending, token, panelUrl }` IMMEDIATELY. Panel POSTs to `/elicit/submit` OR the user copy-pastes JSON back → agent forwards verbatim to `elicit_submit`.
+- **apps** — `elicit` returns `{ pending, token, panelUri }` IMMEDIATELY. mcp-ui widget posts back → agent forwards to `elicit_submit`.
+
+### 4.2 Slow-ask auto-router (normative)
+
+Before negotiating tiers, the server inspects the AskSet for asks that are likely to exceed the per-call MCP timeout when issued one-question-at-a-time through the native elicitation primitive. If any such ask is present the server MUST drop `elicitation` from the candidate tier list and surface `_meta.elicitkit.routedAwayFromElicitation: true` with a `routeReason` naming the rule that fired. The agent does not choose tiers manually.
+
+| Trigger | Reason |
+|---|---|
+| `ask_text` with `multiline: true` OR `maxLen >= 200` (or `maxLen` unset) | Long typing time |
+| `ask_code_diff` with > 2 hunks total across all files | Hunk-by-hunk review needs thought |
+| `ask_rank` with > 4 items | Ordering > 4 takes thought |
+
+Quick asks pass through to elicitation: `ask_select` (≤ 8 options), `ask_confirm`, `ask_number`, `ask_rating`, `ask_slider`, `ask_date`, `ask_color`, short `ask_text`. Future composite types (`ask_form`, `ask_table`) reserve the rule slot.
+
 ## 5. Answer contract
 
 ```jsonc

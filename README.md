@@ -59,6 +59,8 @@ Same snippet, everywhere it goes. Where to paste it per client:
 
 Verify the server is wired (e.g. `/mcp` in Claude Code or `codex mcp get elicitkit`), then ask for something that needs your input — *"Ask me which environments to deploy to and whether to run migrations."* The agent calls the `elicit` tool itself; the host renders the question; typed answers come back.
 
+> `elicit` returns fast — every tool call is bounded by one user answer at most. On the elicitation tier the agent calls `elicit_next(token)` per ask until `pending:false`; on `tui` / `url` / `apps` it collects answers via the tier's channel and calls `elicit_submit(token, answers)`. The server auto-routes slow asks (long text, big code diffs, large ranks) to the panel tier so the per-call MCP timeout is never the gating factor.
+
 ### CLI (shell-out, no MCP)
 
 Pipe an `AskSet` in, get validated typed answers out (stdout is pure JSON; prompts go to stderr):

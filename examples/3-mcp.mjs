@@ -81,10 +81,46 @@ const sub = await client.callTool({
 line("  user submits → agent now has typed answers:");
 line("    " + JSON.stringify(sub.structuredContent.answers.map((a) => ({ id: a.id, status: a.status, value: a.value }))));
 
-line("\n=== Tier B: same Ask, host has NO custom UI → native elicitation ===");
-const el = await client.callTool({ name: "elicit", arguments: { askSet, supportedTiers: ["elicitation", "tui"] } });
-line(`  resolved inline (no token, no submit): renderedTier=${el._meta.elicitkit.renderedTier}`);
-line("    " + JSON.stringify(el.structuredContent.answers.map((a) => ({ id: a.id, status: a.status, value: a.value }))));
+line("\n=== Tier B: same Ask, host has NO custom UI → server picks the tier ===");
+// `elicit` returns FAST. For the elicitation tier the agent loops
+// `elicit_next` per ask until pending:false. For tui/url/apps the
+// agent collects answers via the tier's channel and calls
+// `elicit_submit`. Each individual tool call is bounded by ONE user
+// answer — never the whole AskSet (the timeout-fix contract).
+let cur = await client.callTool({
+  name: "elicit",
+  arguments: { askSet, supportedTiers: ["elicitation", "tui"] },
+});
+const tier = cur._meta.elicitkit.renderedTier;
+line(`  server chose tier: ${tier}` +
+  (cur._meta.elicitkit.routedAwayFromElicitation
+    ? ` (auto-routed away from elicitation: ${cur._meta.elicitkit.routeReason})`
+    : ""));
+
+if (tier === "elicitation") {
+  line(`  first call → pending:${cur._meta.elicitkit.pending}, completed:${cur.structuredContent.completed}/${cur.structuredContent.total}`);
+  while (cur._meta.elicitkit.pending) {
+    cur = await client.callTool({
+      name: "elicit_next",
+      arguments: { token: cur._meta.elicitkit.token },
+    });
+    if (cur._meta.elicitkit.pending) {
+      line(`  elicit_next → pending:true, completed:${cur.structuredContent.completed}/${cur.structuredContent.total}`);
+    } else {
+      line(`  elicit_next → pending:false (round complete)`);
+    }
+  }
+  line("    " + JSON.stringify(cur.structuredContent.answers.map((a) => ({ id: a.id, status: a.status, value: a.value }))));
+} else {
+  // tui (or any panel tier the auto-router falls back to): collect
+  // answers via the tier's channel — for this demo, synthesize them.
+  line(`  panel ready → agent gathers answers, then calls elicit_submit`);
+  const submit = await client.callTool({
+    name: "elicit_submit",
+    arguments: { token: cur._meta.elicitkit.token, answers: askSet.asks.map(fakeAnswer) },
+  });
+  line("    " + JSON.stringify(submit.structuredContent.answers.map((a) => ({ id: a.id, status: a.status, value: a.value }))));
+}
 
 line("\nSame question, two clients, both work — that's the 4-tier point.\n");
 await client.close();

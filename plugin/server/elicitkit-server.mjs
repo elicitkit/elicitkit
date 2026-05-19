@@ -33397,12 +33397,254 @@ function detail(ask) {
 }
 
 // packages/renderers/dist/elicitation.js
-async function runElicitation(set, elicit) {
-  const out = [];
-  for (const ask of set.asks) {
-    out.push(await one(ask, elicit));
+function compileAskToInputs(ask) {
+  switch (ask.type) {
+    case "ask_text":
+      return [
+        {
+          message: msg(ask),
+          requestedSchema: {
+            type: "object",
+            properties: {
+              value: {
+                type: "string",
+                title: ask.prompt,
+                ...ask.spec.maxLen ? { maxLength: ask.spec.maxLen } : {}
+              }
+            },
+            required: ["value"]
+          }
+        }
+      ];
+    case "ask_confirm":
+      return [
+        {
+          message: ask.spec.consequence ? `${msg(ask)}
+
+${ask.spec.consequence}` : msg(ask),
+          requestedSchema: {
+            type: "object",
+            properties: {
+              value: { type: "boolean", title: ask.prompt }
+            },
+            required: ["value"]
+          }
+        }
+      ];
+    case "ask_select": {
+      const s = ask.spec;
+      const branches = s.options.map((o) => ({ const: o.id, title: o.label }));
+      const ids = s.options.map((o) => o.id);
+      const descLines = s.options.filter((o) => !!o.description).map((o) => `- ${o.label}: ${o.description}`);
+      const message = descLines.length > 0 ? `${msg(ask)}
+
+${descLines.join("\n")}` : msg(ask);
+      return [
+        {
+          message,
+          requestedSchema: {
+            type: "object",
+            properties: {
+              value: s.multiple ? {
+                type: "array",
+                title: ask.prompt,
+                items: { anyOf: branches },
+                ...s.min ? { minItems: s.min } : {},
+                ...s.max ? { maxItems: s.max } : {}
+              } : {
+                type: "string",
+                title: ask.prompt,
+                oneOf: branches,
+                default: ids[0]
+              }
+            },
+            required: ["value"]
+          }
+        }
+      ];
+    }
+    case "ask_code_diff": {
+      const inputs = [];
+      for (const file of ask.spec.files) {
+        for (const h2 of file.hunks) {
+          inputs.push({
+            message: `${ask.prompt}
+
+${file.path}` + (h2.header ? ` \u2014 ${h2.header}` : ` \u2014 hunk ${h2.id}`) + `
+
+${h2.after}`,
+            requestedSchema: {
+              type: "object",
+              properties: {
+                accept: {
+                  type: "boolean",
+                  title: `Accept this hunk (${h2.id})?`,
+                  default: true
+                }
+              },
+              required: ["accept"]
+            }
+          });
+        }
+      }
+      return inputs;
+    }
+    case "ask_number": {
+      const s = ask.spec ?? {};
+      return [
+        {
+          message: msg(ask) + (s.unit ? `
+
+(unit: ${s.unit})` : ""),
+          requestedSchema: {
+            type: "object",
+            properties: {
+              value: {
+                type: s.integer ? "integer" : "number",
+                title: ask.prompt,
+                ...typeof s.min === "number" ? { minimum: s.min } : {},
+                ...typeof s.max === "number" ? { maximum: s.max } : {}
+              }
+            },
+            required: ["value"]
+          }
+        }
+      ];
+    }
+    case "ask_slider": {
+      const s = ask.spec;
+      return [
+        {
+          message: msg(ask) + `
+
+(${s.min}\u2013${s.max}${s.unit ? " " + s.unit : ""})`,
+          requestedSchema: {
+            type: "object",
+            properties: {
+              value: { type: "number", title: ask.prompt, minimum: s.min, maximum: s.max }
+            },
+            required: ["value"]
+          }
+        }
+      ];
+    }
+    case "ask_rating": {
+      const max = ask.spec?.max ?? 5;
+      return [
+        {
+          message: msg(ask) + `
+
+(1 = lowest, ${max} = highest)`,
+          requestedSchema: {
+            type: "object",
+            properties: {
+              value: { type: "integer", title: ask.prompt, minimum: 1, maximum: max }
+            },
+            required: ["value"]
+          }
+        }
+      ];
+    }
+    case "ask_date": {
+      return [
+        {
+          message: msg(ask),
+          requestedSchema: {
+            type: "object",
+            properties: {
+              value: {
+                type: "string",
+                title: ask.prompt,
+                format: ask.spec?.time ? "date-time" : "date"
+              }
+            },
+            required: ["value"]
+          }
+        }
+      ];
+    }
+    case "ask_rank": {
+      const items = ask.spec.items;
+      const branches = items.map((i) => ({ const: i.id, title: i.label }));
+      return [
+        {
+          message: `${msg(ask)}
+
+Rank by listing every option in order, best first:
+` + items.map((i) => `- ${i.id}: ${i.label}`).join("\n"),
+          requestedSchema: {
+            type: "object",
+            properties: {
+              value: {
+                type: "array",
+                title: ask.prompt,
+                items: { anyOf: branches },
+                minItems: items.length,
+                maxItems: items.length
+              }
+            },
+            required: ["value"]
+          }
+        }
+      ];
+    }
+    case "ask_color": {
+      const pal = ask.spec?.palette ?? [];
+      const fixed = pal.length > 0 && ask.spec?.allowCustom !== true;
+      const branches = pal.map((c2) => ({ const: c2, title: c2 }));
+      return [
+        {
+          message: fixed ? msg(ask) : `${msg(ask)}
+
+Enter a CSS color (e.g. #1d4ed8)` + (pal.length ? `
+Suggested: ${pal.join(", ")}` : ""),
+          requestedSchema: {
+            type: "object",
+            properties: {
+              value: fixed ? { type: "string", title: ask.prompt, oneOf: branches } : { type: "string", title: ask.prompt }
+            },
+            required: ["value"]
+          }
+        }
+      ];
+    }
+    default: {
+      const a = ask;
+      return [
+        {
+          message: msg(a),
+          requestedSchema: {
+            type: "object",
+            properties: { value: { type: "string", title: a.prompt } },
+            required: ["value"]
+          }
+        }
+      ];
+    }
   }
-  return out;
+}
+function decodeAskAnswer(ask, responses) {
+  if (ask.type !== "ask_code_diff") {
+    const r = responses[0];
+    if (!r)
+      return answer(ask, "deferred");
+    return answer(ask, statusFor(r.action), readValue(ask, r));
+  }
+  const accepted = [];
+  const rejected = [];
+  let i = 0;
+  for (const file of ask.spec.files) {
+    for (const h2 of file.hunks) {
+      const r = responses[i++];
+      if (!r)
+        return answer(ask, "deferred", { accepted, rejected });
+      if (r.action !== "accept") {
+        return answer(ask, statusFor(r.action));
+      }
+      (r.content?.accept === false ? rejected : accepted).push(h2.id);
+    }
+  }
+  return answer(ask, "answered", { accepted, rejected });
 }
 function statusFor(action) {
   return action === "accept" ? "answered" : action === "decline" ? "declined" : "deferred";
@@ -33421,235 +33663,12 @@ function answer(ask, status, value) {
     meta: { tier: "elicitation", specVersion: ask.meta?.specVersion }
   };
 }
-async function one(ask, elicit) {
-  switch (ask.type) {
-    case "ask_text": {
-      const r = await elicit({
-        message: msg(ask),
-        requestedSchema: {
-          type: "object",
-          properties: {
-            value: {
-              type: "string",
-              title: ask.prompt,
-              ...ask.spec.maxLen ? { maxLength: ask.spec.maxLen } : {}
-            }
-          },
-          required: ["value"]
-        }
-      });
-      return answer(ask, statusFor(r.action), r.content?.value);
-    }
-    case "ask_confirm": {
-      const r = await elicit({
-        message: ask.spec.consequence ? `${msg(ask)}
-
-${ask.spec.consequence}` : msg(ask),
-        requestedSchema: {
-          type: "object",
-          properties: {
-            value: { type: "boolean", title: ask.prompt }
-          },
-          required: ["value"]
-        }
-      });
-      return answer(ask, statusFor(r.action), r.content?.value);
-    }
-    case "ask_select": {
-      const s = ask.spec;
-      const branches = s.options.map((o) => ({ const: o.id, title: o.label }));
-      const ids = s.options.map((o) => o.id);
-      const descLines = s.options.filter((o) => !!o.description).map((o) => `- ${o.label}: ${o.description}`);
-      const message = descLines.length > 0 ? `${msg(ask)}
-
-${descLines.join("\n")}` : msg(ask);
-      const r = await elicit({
-        message,
-        requestedSchema: {
-          type: "object",
-          properties: {
-            value: s.multiple ? {
-              type: "array",
-              title: ask.prompt,
-              items: { anyOf: branches },
-              ...s.min ? { minItems: s.min } : {},
-              ...s.max ? { maxItems: s.max } : {}
-            } : {
-              type: "string",
-              title: ask.prompt,
-              oneOf: branches,
-              // Pre-select the first option so the native elicitation
-              // form always carries a valid value — hitting submit
-              // without touching the field no longer fails `required`.
-              default: ids[0]
-            }
-          },
-          required: ["value"]
-        }
-      });
-      return answer(ask, statusFor(r.action), r.content?.value);
-    }
-    case "ask_code_diff": {
-      const accepted = [];
-      const rejected = [];
-      for (const file of ask.spec.files) {
-        for (const h2 of file.hunks) {
-          const r = await elicit({
-            message: `${ask.prompt}
-
-${file.path}` + (h2.header ? ` \u2014 ${h2.header}` : ` \u2014 hunk ${h2.id}`) + `
-
-${h2.after}`,
-            requestedSchema: {
-              type: "object",
-              properties: {
-                accept: {
-                  type: "boolean",
-                  title: `Accept this hunk (${h2.id})?`,
-                  default: true
-                }
-              },
-              required: ["accept"]
-            }
-          });
-          if (r.action !== "accept") {
-            return answer(ask, statusFor(r.action));
-          }
-          (r.content?.accept === false ? rejected : accepted).push(h2.id);
-        }
-      }
-      return answer(ask, "answered", { accepted, rejected });
-    }
-    case "ask_number": {
-      const s = ask.spec ?? {};
-      const r = await elicit({
-        message: msg(ask) + (s.unit ? `
-
-(unit: ${s.unit})` : ""),
-        requestedSchema: {
-          type: "object",
-          properties: {
-            value: {
-              type: s.integer ? "integer" : "number",
-              title: ask.prompt,
-              ...typeof s.min === "number" ? { minimum: s.min } : {},
-              ...typeof s.max === "number" ? { maximum: s.max } : {}
-            }
-          },
-          required: ["value"]
-        }
-      });
-      return answer(ask, statusFor(r.action), r.content?.value);
-    }
-    case "ask_slider": {
-      const s = ask.spec;
-      const r = await elicit({
-        message: msg(ask) + `
-
-(${s.min}\u2013${s.max}${s.unit ? " " + s.unit : ""})`,
-        requestedSchema: {
-          type: "object",
-          properties: {
-            value: { type: "number", title: ask.prompt, minimum: s.min, maximum: s.max }
-          },
-          required: ["value"]
-        }
-      });
-      return answer(ask, statusFor(r.action), r.content?.value);
-    }
-    case "ask_rating": {
-      const max = ask.spec?.max ?? 5;
-      const r = await elicit({
-        message: msg(ask) + `
-
-(1 = lowest, ${max} = highest)`,
-        requestedSchema: {
-          type: "object",
-          properties: {
-            value: { type: "integer", title: ask.prompt, minimum: 1, maximum: max }
-          },
-          required: ["value"]
-        }
-      });
-      return answer(ask, statusFor(r.action), r.content?.value);
-    }
-    case "ask_date": {
-      const r = await elicit({
-        message: msg(ask),
-        requestedSchema: {
-          type: "object",
-          properties: {
-            value: {
-              type: "string",
-              title: ask.prompt,
-              format: ask.spec?.time ? "date-time" : "date"
-            }
-          },
-          required: ["value"]
-        }
-      });
-      return answer(ask, statusFor(r.action), r.content?.value);
-    }
-    case "ask_rank": {
-      const items = ask.spec.items;
-      const branches = items.map((i) => ({ const: i.id, title: i.label }));
-      const r = await elicit({
-        message: `${msg(ask)}
-
-Rank by listing every option in order, best first:
-` + items.map((i) => `- ${i.id}: ${i.label}`).join("\n"),
-        requestedSchema: {
-          type: "object",
-          properties: {
-            value: {
-              type: "array",
-              title: ask.prompt,
-              items: { anyOf: branches },
-              minItems: items.length,
-              maxItems: items.length
-            }
-          },
-          required: ["value"]
-        }
-      });
-      if (r.action !== "accept")
-        return answer(ask, statusFor(r.action));
-      const raw = r.content?.value;
-      const ordered = Array.isArray(raw) ? raw.map((x) => String(x)) : String(raw ?? "").split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
-      return answer(ask, "answered", ordered);
-    }
-    case "ask_color": {
-      const pal = ask.spec?.palette ?? [];
-      const fixed = pal.length > 0 && ask.spec?.allowCustom !== true;
-      const branches = pal.map((c2) => ({ const: c2, title: c2 }));
-      const r = await elicit({
-        message: fixed ? msg(ask) : `${msg(ask)}
-
-Enter a CSS color (e.g. #1d4ed8)` + (pal.length ? `
-Suggested: ${pal.join(", ")}` : ""),
-        requestedSchema: {
-          type: "object",
-          properties: {
-            value: fixed ? { type: "string", title: ask.prompt, oneOf: branches } : { type: "string", title: ask.prompt }
-          },
-          required: ["value"]
-        }
-      });
-      return answer(ask, statusFor(r.action), r.content?.value);
-    }
-    default: {
-      const a = ask;
-      const r = await elicit({
-        message: msg(a),
-        requestedSchema: {
-          type: "object",
-          properties: { value: { type: "string", title: a.prompt } },
-          required: ["value"]
-        }
-      });
-      return answer(a, statusFor(r.action), r.content?.value);
-    }
+function readValue(ask, r) {
+  if (ask.type === "ask_rank") {
+    const raw = r.content?.value;
+    return Array.isArray(raw) ? raw.map((x) => String(x)) : String(raw ?? "").split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
   }
+  return r.content?.value;
 }
 
 // packages/server/src/tiers.ts
@@ -33679,6 +33698,43 @@ function negotiateTier(set, hostSupported) {
   }
   return { tier: "tui", negotiated: false };
 }
+function slowAskRoute(set) {
+  for (const ask of set.asks) {
+    const r = isSlowAsk(ask);
+    if (r) return { routed: true, reason: r };
+  }
+  return { routed: false };
+}
+function isSlowAsk(ask) {
+  switch (ask.type) {
+    case "ask_text": {
+      const s = ask.spec ?? {};
+      if (s.multiline === true) return "ask_text.multiline";
+      if (typeof s.maxLen === "number") {
+        if (s.maxLen >= 200) return "ask_text.maxLen>=200";
+      } else {
+        return "ask_text.maxLen-unset";
+      }
+      return null;
+    }
+    case "ask_code_diff": {
+      const files = ask.spec.files ?? [];
+      const hunks = files.reduce((n, f2) => n + (f2.hunks?.length ?? 0), 0);
+      if (hunks > 2) return "ask_code_diff.hunks>2";
+      return null;
+    }
+    case "ask_rank": {
+      const items = ask.spec.items ?? [];
+      if (items.length > 4) return "ask_rank.items>4";
+      return null;
+    }
+    // Reserved hooks for v0.1 (ask_form / ask_table land later):
+    // the names are listed in the SPEC additive so a forward-compatible
+    // implementation could plug them in here without a major bump.
+    default:
+      return null;
+  }
+}
 
 // packages/server/src/render.ts
 async function renderPanel(set, tier, token) {
@@ -33690,17 +33746,42 @@ async function renderPanel(set, tier, token) {
 // packages/server/src/submit.ts
 import { randomUUID } from "node:crypto";
 var pending = /* @__PURE__ */ new Map();
-function openRound(set) {
+function openRound(set, opts = {}) {
   const token = randomUUID();
-  pending.set(token, set);
+  pending.set(token, {
+    set,
+    tier: opts.tier ?? "tui",
+    index: 0,
+    collected: [],
+    ...opts.routedAwayFromElicitation ? { routedAwayFromElicitation: opts.routedAwayFromElicitation } : {}
+  });
   return token;
 }
-function closeRound(token, raw) {
-  const set = pending.get(token);
-  if (!set) {
+function peekRoundState(token) {
+  return pending.get(token);
+}
+function appendCollected(token, answer2) {
+  const st2 = pending.get(token);
+  if (!st2) return void 0;
+  st2.collected.push(answer2);
+  st2.index += 1;
+  return { completed: st2.collected.length, total: st2.set.asks.length };
+}
+function closeCollected(token) {
+  const st2 = pending.get(token);
+  if (!st2) {
     return { ok: false, answers: [], errors: ["unknown or expired token"] };
   }
-  const r = validateAnswers(set, raw);
+  const r = validateAnswers(st2.set, st2.collected);
+  if (r.ok) pending.delete(token);
+  return r;
+}
+function closeRound(token, raw) {
+  const st2 = pending.get(token);
+  if (!st2) {
+    return { ok: false, answers: [], errors: ["unknown or expired token"] };
+  }
+  const r = validateAnswers(st2.set, raw);
   if (r.ok) pending.delete(token);
   return r;
 }
@@ -33721,7 +33802,7 @@ function createElicitServer(opts = {}) {
     "elicit",
     {
       title: "Elicit structured input",
-      description: "Render an Elicitkit AskSet to the user and obtain typed answers. Pass a v0.1 AskSet. Do not fabricate answers \u2014 they arrive from the user (via elicit_submit, or inline for the elicitation tier).",
+      description: "Render an Elicitkit AskSet to the user and obtain typed answers. Returns FAST: panel tiers return a token + rendering; the elicitation tier issues ONE native prompt inline and returns `pending:true` so the per-call MCP timeout is never blown by human-think time. If `pending:true` and tier === 'elicitation', call `elicit_next(token)` until `pending:false`; otherwise collect answers per the rendering and call `elicit_submit(token, answers)`. Never fabricate answers.",
       inputSchema: {
         askSet: external_exports.unknown().describe("A v0.1 Elicitkit AskSet: { specVersion, asks: [...] }"),
         supportedTiers: external_exports.array(external_exports.enum(TIER_VALUES)).optional().describe(
@@ -33760,25 +33841,39 @@ function createElicitServer(opts = {}) {
         hostTiers.add("apps");
         hostTiers.add("url");
       }
-      let effective = [...hostTiers];
+      const slow = slowAskRoute(set);
+      const candidates = new Set(hostTiers);
+      if (slow.routed) candidates.delete("elicitation");
+      let effective = [...candidates];
       const requested = supportedTiers;
       if (requested && requested.length > 0) {
         const r = new Set(requested);
         const narrowed = effective.filter((t) => r.has(t));
         if (narrowed.length > 0) effective = narrowed;
       }
+      if (effective.length === 0) effective = ["tui"];
       const { tier, negotiated } = negotiateTier(set, effective);
+      const baseMeta = {
+        renderedTier: tier,
+        tierNegotiated: negotiated,
+        hostTiers: [...hostTiers],
+        ...slow.routed ? { routedAwayFromElicitation: true, routeReason: slow.reason } : {}
+      };
       if (tier === "elicitation") {
-        const answers = await runElicitation(set, elicit);
-        return {
-          content: [{ type: "text", text: JSON.stringify(answers, null, 2) }],
-          structuredContent: { answers },
-          _meta: {
-            elicitkit: { renderedTier: "elicitation", tierNegotiated: negotiated, inline: true, clientElicitation, hostTiers: [...hostTiers] }
-          }
-        };
+        const token2 = openRound(set, { tier: "elicitation" });
+        const out2 = await driveOneStep(token2, elicit);
+        if (!out2.ok) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: out2.error }]
+          };
+        }
+        return out2.result(token2, baseMeta);
       }
-      const token = openRound(set);
+      const token = openRound(set, {
+        tier,
+        ...slow.routed ? { routedAwayFromElicitation: { reason: slow.reason ?? "" } } : {}
+      });
       const out = await renderPanel(set, tier, token);
       const content = [
         { type: "text", text: out.text }
@@ -33788,17 +33883,70 @@ function createElicitServer(opts = {}) {
       }
       return {
         content,
+        structuredContent: {
+          pending: true,
+          token,
+          tier,
+          ...tier === "url" || tier === "apps" ? { panelUri: out.ui?.resource.uri } : {}
+        },
         _meta: {
           elicitkit: {
             token,
+            pending: true,
+            ...baseMeta,
             renderedTier: out.tier,
             requestedTier: tier,
-            tierNegotiated: negotiated,
-            hostTiers: [...hostTiers]
+            ...out.ui ? {} : {}
           },
           ...out.ui ? { ui: { resourceUri: out.ui.resource.uri } } : {}
         }
       };
+    }
+  );
+  server.registerTool(
+    "elicit_next",
+    {
+      title: "Advance an open elicitation-tier round",
+      description: "Drive the next native elicitInput for an open elicitation-tier round. Returns `pending:true` (more asks to come) or `pending:false` with the validated `answers`. Only valid for the elicitation tier \u2014 panel tiers (tui/url/apps) complete via elicit_submit instead.",
+      inputSchema: {
+        token: external_exports.string().describe("The round token from a prior elicit / elicit_next result.")
+      }
+    },
+    async ({ token }) => {
+      const st2 = peekRoundState(token);
+      if (!st2) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "unknown or expired token" }]
+        };
+      }
+      if (st2.tier !== "elicitation") {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `round token is for tier ${st2.tier}; use elicit_submit instead`
+            }
+          ]
+        };
+      }
+      if (st2.index >= st2.set.asks.length) {
+        return {
+          isError: true,
+          content: [
+            { type: "text", text: "round already complete; no more asks" }
+          ]
+        };
+      }
+      const out = await driveOneStep(token, elicit);
+      if (!out.ok) {
+        return { isError: true, content: [{ type: "text", text: out.error }] };
+      }
+      return out.result(token, {
+        renderedTier: "elicitation",
+        hostTiers: []
+      });
     }
   );
   server.registerTool(
@@ -33828,8 +33976,8 @@ function createElicitServer(opts = {}) {
       }
       return {
         content: [{ type: "text", text: JSON.stringify(r.answers, null, 2) }],
-        structuredContent: { answers: r.answers },
-        _meta: { elicitkit: { token, ok: true } }
+        structuredContent: { answers: r.answers, pending: false },
+        _meta: { elicitkit: { token, ok: true, pending: false } }
       };
     }
   );
@@ -33859,7 +34007,7 @@ function createElicitServer(opts = {}) {
         };
       }
       const set = askSet;
-      const token = openRound(set);
+      const token = openRound(set, { tier: "url" });
       const html = buildPanelHtml(set, token, "url");
       return {
         content: [
@@ -33875,6 +34023,123 @@ function createElicitServer(opts = {}) {
     }
   );
   return server;
+}
+async function driveOneStep(token, elicit) {
+  const st2 = peekRoundState(token);
+  if (!st2) return { ok: false, error: "unknown or expired token" };
+  const stateAny = st2;
+  if (!stateAny.subResponses) stateAny.subResponses = [];
+  const askIdx = stateAny.index;
+  const ask = stateAny.set.asks[askIdx];
+  if (!ask) {
+    return { ok: false, error: "round already complete; no more asks" };
+  }
+  const inputs = compileAskToInputs(ask);
+  const subStep = stateAny.subResponses.length;
+  const params = inputs[subStep];
+  if (!params) {
+    return { ok: false, error: "no elicitInput compiled for ask" };
+  }
+  const r = await elicit(params);
+  stateAny.subResponses.push(r);
+  const moreSubSteps = inputs.length > stateAny.subResponses.length;
+  const continueAsk = moreSubSteps && (ask.type !== "ask_code_diff" || r.action === "accept");
+  if (continueAsk) {
+    return {
+      ok: true,
+      result: (tok, extra) => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { pending: true, token: tok, completed: stateAny.index, total: stateAny.set.asks.length },
+              null,
+              2
+            )
+          }
+        ],
+        structuredContent: {
+          pending: true,
+          token: tok,
+          tier: "elicitation",
+          completed: stateAny.index,
+          total: stateAny.set.asks.length
+        },
+        _meta: {
+          elicitkit: {
+            token: tok,
+            pending: true,
+            completed: stateAny.index,
+            total: stateAny.set.asks.length,
+            ...extra
+          }
+        }
+      })
+    };
+  }
+  const answer2 = decodeAskAnswer(ask, stateAny.subResponses);
+  const counters = appendCollected(token, answer2);
+  stateAny.subResponses = [];
+  if (counters.completed < counters.total) {
+    return {
+      ok: true,
+      result: (tok, extra) => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { pending: true, token: tok, completed: counters.completed, total: counters.total },
+              null,
+              2
+            )
+          }
+        ],
+        structuredContent: {
+          pending: true,
+          token: tok,
+          tier: "elicitation",
+          completed: counters.completed,
+          total: counters.total
+        },
+        _meta: {
+          elicitkit: {
+            token: tok,
+            pending: true,
+            completed: counters.completed,
+            total: counters.total,
+            ...extra
+          }
+        }
+      })
+    };
+  }
+  const final = closeCollected(token);
+  if (!final.ok) {
+    return {
+      ok: false,
+      error: "Answers rejected \u2014 re-ask (SPEC.md \xA75):\n- " + final.errors.join("\n- ")
+    };
+  }
+  return {
+    ok: true,
+    result: (tok, extra) => ({
+      content: [{ type: "text", text: JSON.stringify(final.answers, null, 2) }],
+      structuredContent: {
+        pending: false,
+        token: tok,
+        tier: "elicitation",
+        answers: final.answers
+      },
+      _meta: {
+        elicitkit: {
+          token: tok,
+          pending: false,
+          inline: true,
+          ...extra
+        }
+      }
+    })
+  };
 }
 
 // packages/server/src/bin.ts

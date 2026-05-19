@@ -70,15 +70,43 @@ Pick the **type** that matches the answer's shape:
   forward it verbatim to `elicit_submit` — it is optional and
   user-initiated, never something you solicit here.
 
+## Control flow
+
+Every `elicit` call returns FAST with a "pending" envelope — the
+per-call MCP timeout is never blown by the user's think time.
+
+- After `elicit`, **if `pending: true` and `tier === "elicitation"`**, call
+  `elicit_next(token)` in a loop until `pending: false`; the final
+  result carries `answers`.
+- For `tui` / `url` / `apps` tiers, collect answers via the tier's
+  channel (tui: the agent reads back; url: panel paste-back; apps:
+  mcp-ui postMessage) and call `elicit_submit(token, answers)`.
+
+## Question-design hints
+
+For inference / preference-mining tasks ("identify X without asking X
+directly"), prefer ONE `ask_rank` over many `ask_select`s — a single
+whole-ordering carries roughly k MCQs of signal. Mix types when each
+measures a different axis (e.g. one `ask_select` on style, one
+`ask_rank` on priorities, one `ask_slider` on intensity).
+
+The server auto-routes **slow asks** (long text, code diffs with many
+hunks, large ranks) to the panel tier — you don't have to choose tiers
+manually. Don't try to force `supportedTiers: ["elicitation"]` for a
+slow ask; the server has already decided.
+
 ## Rules
 
 - **Do not fabricate answers.** They come back from the tool result
-  (`structuredContent.answers`), inline for the elicitation tier. Wait for it.
-- Batch related questions into one `askSet` (one round-trip) rather than many
-  separate calls.
-- If the result has `_meta.elicitkit.token` (panel/tui tiers), the user's
-  answers arrive via the `elicit_submit` tool — for the `url` tier the user
-  pastes a JSON payload back; forward it verbatim to `elicit_submit`.
+  (`structuredContent.answers`), only on the FINAL call of a round
+  (`pending: false`). Drive the round to completion before continuing.
+- Batch related questions into one `askSet` rather than calling `elicit`
+  again per question. The pending-loop is one round; new questions =
+  new round.
+- Every `elicit` call returns a token in `_meta.elicitkit.token`. For
+  the elicitation tier, pass it to `elicit_next` until `pending:false`;
+  for tui/url/apps, pass it to `elicit_submit` with the collected
+  answers (url panels paste back JSON — forward it verbatim).
 - Honor `declined`/`deferred` — the user choosing not to answer is a valid,
   first-class outcome; don't loop or coerce.
 - Don't pass `supportedTiers` unless you actually know the host's UI

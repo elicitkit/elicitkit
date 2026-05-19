@@ -6,6 +6,8 @@ import {
   SEMANTIC,
   ELICITATION_RENDER,
   INTEGRATION,
+  ELICIT_PENDING_SHAPE,
+  SLOW_ASK_ROUTING,
 } from "./corpus.js";
 
 export * from "./corpus.js";
@@ -46,6 +48,19 @@ export interface ConformanceTarget {
    *  fixture's per-tier tokens — that is what "faithfully rendered
    *  across all 4 tiers" means for a v0.1 implementation. */
   renderTiers?(askSet: unknown): TierRenderings;
+  /** Optional: simulate an `elicit` tool call (non-blocking contract).
+   *  Returns the rendering blob the agent receives back per tier — must
+   *  carry the pending-shape tokens (pending/token/tier) the SPEC
+   *  defines. The runner serialises whatever is returned and
+   *  substring-matches against the fixture's per-tier expectations. */
+  elicitPendingShape?(askSet: unknown, tier: "tui" | "elicitation" | "url" | "apps"): unknown;
+  /** Optional: simulate tier negotiation for an AskSet against a host
+   *  that offers ALL four tiers — the slow-ask auto-router MUST drop
+   *  `elicitation` when the set contains a slow-likely ask. Return
+   *  enough context that the runner can substring-match BOTH the
+   *  decision flag (e.g. `routedAwayFromElicitation: true`) AND the
+   *  rule name (the ask type that triggered). */
+  slowAskRoute?(askSet: unknown): unknown;
 }
 
 export interface CheckResult {
@@ -69,6 +84,8 @@ export interface ConformanceReport {
     answerSemantics: boolean;
     elicitationRender: boolean;
     integration: boolean;
+    pendingShape: boolean;
+    slowAskRouting: boolean;
   };
 }
 
@@ -192,6 +209,85 @@ export function runConformance(target: ConformanceTarget): ConformanceReport {
         : `cross-type drift — missing per-tier substrings: ${missing.join(", ")} (${c.note})`);
   }
 
+  // Non-blocking `elicit` contract: per-tier pending-shape fixtures.
+  // Optional capability — an adopter without `elicitPendingShape` still
+  // passes (validateAskSet on the underlying AskSet is part of askSet),
+  // but the pending rows are listed as a skip so the count is stable
+  // across capability levels.
+  const hasPendingShape = typeof target.elicitPendingShape === "function";
+  for (const c of ELICIT_PENDING_SHAPE) {
+    const askValid = target.validateAskSet(c.askSet).ok;
+    if (!askValid) {
+      rec(results, "pendingShape", c.name, false,
+        `pending-shape AskSet rejected by validateAskSet (${c.note})`);
+      continue;
+    }
+    if (!hasPendingShape) {
+      rec(results, "pendingShape", c.name, true,
+        `AskSet validates; elicitPendingShape not provided (${c.note})`);
+      continue;
+    }
+    const tiers = Object.keys(c.mustIncludePerTier) as Array<keyof typeof c.mustIncludePerTier>;
+    const missing: string[] = [];
+    let crashed: string | null = null;
+    for (const t of tiers) {
+      let blob = "";
+      try {
+        const out = target.elicitPendingShape!.bind(target)(c.askSet, t);
+        blob = typeof out === "string" ? out : JSON.stringify(out);
+      } catch (e) {
+        crashed = String(e);
+        break;
+      }
+      for (const s of c.mustIncludePerTier[t] ?? []) {
+        if (!blob.includes(s)) missing.push(`${t}:${s}`);
+      }
+    }
+    const ok = crashed === null && missing.length === 0;
+    rec(results, "pendingShape", c.name, ok,
+      crashed
+        ? `elicitPendingShape threw: ${crashed}`
+        : missing.length
+          ? `missing pending-shape tokens: ${missing.join(", ")} (${c.note})`
+          : `pending-shape tokens surfaced (${c.note})`);
+  }
+
+  // Slow-ask auto-router fixtures: an AskSet containing a slow-likely
+  // ask MUST route away from elicitation. The runner serialises the
+  // route-decision blob and substring-matches the required + forbidden
+  // tokens.
+  const hasSlowAsk = typeof target.slowAskRoute === "function";
+  for (const c of SLOW_ASK_ROUTING) {
+    if (!hasSlowAsk) {
+      // Optional capability: surface as a skip-row that passes, so a
+      // schema-only target's count stays deterministic.
+      const askValid = target.validateAskSet(c.askSet).ok;
+      rec(results, "slowAskRouting", c.name, askValid,
+        askValid
+          ? `AskSet validates; slowAskRoute not provided (${c.note})`
+          : `slow-ask AskSet rejected by validateAskSet (${c.note})`);
+      continue;
+    }
+    let blob = "";
+    try {
+      const out = target.slowAskRoute!.bind(target)(c.askSet);
+      blob = typeof out === "string" ? out : JSON.stringify(out);
+    } catch (e) {
+      rec(results, "slowAskRouting", c.name, false,
+        `slowAskRoute threw: ${String(e)} (${c.note})`);
+      continue;
+    }
+    const missing = c.mustInclude.filter((s) => !blob.includes(s));
+    const leaked = c.mustExclude.filter((s) => blob.includes(s));
+    const ok = missing.length === 0 && leaked.length === 0;
+    rec(results, "slowAskRouting", c.name, ok,
+      missing.length
+        ? `missing route tokens: ${missing.join(", ")} (${c.note})`
+        : leaked.length
+          ? `forbidden route tokens leaked: ${leaked.join(", ")} (${c.note})`
+          : `routed away from elicitation (${c.note})`);
+  }
+
   const passed = results.filter((r) => r.ok).length;
   return {
     compliant: passed === results.length && results.length > 0,
@@ -204,6 +300,8 @@ export function runConformance(target: ConformanceTarget): ConformanceReport {
       answerSemantics: hasSetAware,
       elicitationRender: hasElicitRender,
       integration: hasRenderTiers,
+      pendingShape: hasPendingShape,
+      slowAskRouting: hasSlowAsk,
     },
   };
 }

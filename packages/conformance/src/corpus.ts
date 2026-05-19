@@ -304,6 +304,113 @@ export const INTEGRATION: IntegrationCase[] = [
   },
 ];
 
+// ── Non-blocking elicit contract: per-tier pending-shape fixtures ─────
+// As of the timeout-fix plan EVERY tool call is non-blocking. The
+// `elicit` tool returns a "pending" envelope so the per-call MCP timeout
+// is never the gating factor:
+//
+//   tui          → { pending:true, token, tier, asks }          (immediate)
+//   elicitation  → { pending:true, token, tier, completed:1, total:N }
+//                  after issuing ONE native elicitInput inline
+//   url          → { pending:true, token, tier, panelUrl }      (immediate)
+//   apps         → { pending:true, token, tier, panelUri }      (immediate)
+//
+// An adopter advertises the contract by surfacing those shape tokens in
+// each tier's rendering blob. The runner serialises the rendering and
+// substring-matches against `mustInclude`. A bare token like
+// `"pending":true` is matched as text — adopters in non-JSON languages
+// emit an equivalent textual marker.
+export interface PendingShapeCase {
+  name: string;
+  /** Per-tier substrings the rendering MUST surface. */
+  mustIncludePerTier: { tui?: string[]; elicitation?: string[]; url?: string[]; apps?: string[] };
+  /** The AskSet to render; same across tiers so the only var is the tier. */
+  askSet: unknown;
+  note: string;
+}
+
+const PENDING_SHAPE_ASKSET = set(ask("ask_confirm", {}));
+
+export const ELICIT_PENDING_SHAPE: PendingShapeCase[] = [
+  {
+    name: "pending-shape.tui",
+    askSet: PENDING_SHAPE_ASKSET,
+    note: "tui returns the panel reference + token immediately (pending:true)",
+    mustIncludePerTier: {
+      tui: ["pending", "token", "tui"],
+    },
+  },
+  {
+    name: "pending-shape.elicitation",
+    askSet: PENDING_SHAPE_ASKSET,
+    note: "elicitation returns pending + a completed/total counter so the agent calls elicit_next per ask",
+    mustIncludePerTier: {
+      elicitation: ["pending", "token", "elicitation"],
+    },
+  },
+  {
+    name: "pending-shape.url",
+    askSet: PENDING_SHAPE_ASKSET,
+    note: "url returns the panel reference + token immediately (pending:true)",
+    mustIncludePerTier: {
+      url: ["pending", "token", "url"],
+    },
+  },
+];
+
+// ── Slow-ask auto-router: AskSets that MUST route AWAY from elicitation
+// The server drops `elicitation` from candidates when an ask is
+// likely-slow on the per-prompt elicitation primitive: multiline /
+// unbounded ask_text, ask_code_diff with > 2 hunks, ask_rank with > 4
+// items. The route decision lands in `_meta.elicitkit.
+// routedAwayFromElicitation: true` with a `routeReason` tag — the
+// runner substring-matches both to verify the rule that fired.
+export interface SlowAskRoutingCase {
+  name: string;
+  askSet: unknown;
+  /** Substrings that MUST appear in the route-decision blob. */
+  mustInclude: string[];
+  /** Substrings that MUST NOT appear (e.g. `"elicitation"` in chosen tier). */
+  mustExclude: string[];
+  note: string;
+}
+
+export const SLOW_ASK_ROUTING: SlowAskRoutingCase[] = [
+  {
+    name: "slow-ask-routing.text-multiline",
+    askSet: set(ask("ask_text", { multiline: true })),
+    note: "a multiline ask_text takes too long for a per-prompt elicitation; route to a panel tier",
+    mustInclude: ["routedAwayFromElicitation", "true", "ask_text"],
+    mustExclude: ['"renderedTier":"elicitation"', '"chosen":"elicitation"'],
+  },
+  {
+    name: "slow-ask-routing.code-diff-many-hunks",
+    askSet: set(ask("ask_code_diff", {
+      granularity: "hunk",
+      files: [{ path: "src/a.ts", hunks: [
+        { id: "h1", after: "x=1" },
+        { id: "h2", after: "y=2" },
+        { id: "h3", after: "z=3" },
+      ] }],
+    })),
+    note: "ask_code_diff with > 2 hunks is too long for per-prompt elicitation",
+    mustInclude: ["routedAwayFromElicitation", "true", "ask_code_diff"],
+    mustExclude: ['"renderedTier":"elicitation"', '"chosen":"elicitation"'],
+  },
+  {
+    name: "slow-ask-routing.rank-many-items",
+    askSet: set(ask("ask_rank", {
+      items: [
+        { id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" },
+        { id: "d", label: "D" }, { id: "e", label: "E" },
+      ],
+    })),
+    note: "ask_rank with > 4 items is too long for per-prompt elicitation",
+    mustInclude: ["routedAwayFromElicitation", "true", "ask_rank"],
+    mustExclude: ['"renderedTier":"elicitation"', '"chosen":"elicitation"'],
+  },
+];
+
 // ── Semantic cases for validateAnswers (required / declined / deferred) ─
 export interface SemanticCase {
   name: string;
