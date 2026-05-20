@@ -35,6 +35,16 @@ Drop the universal MCP block into your client (below) — one snippet, every cli
 - **Zero-drift.** The spec is the product; the server is its reference implementation; the JSON Schema is generated, not hand-kept. One source of truth, no spec/impl skew.
 - **The conformance suite is the standard.** "Elicitkit-compliant" is whatever `@elicitkit/conformance` says it is — a spec-derived fixture corpus + a portable runner any implementation points at. It has teeth: it rejects a permissive impl, and the reference server must pass its own suite.
 
+## When this matters most: building shared context, fast
+
+The hard part of working with AI isn't writing the prompt — it's everything the AI doesn't know but should. The dependency you forgot to mention. The constraint that's "obvious" but the model can't see. The trade-off you'd weigh differently than the default.
+
+You can either dump a wall of context up front and hope you covered it, or — better — let the agent **ask you the questions it actually needs answered**. A handful of typed, well-targeted asks (rank these, ✓/✗ this diff, pick the constraint that wins) and the agent knows things you wouldn't have volunteered, sometimes things you hadn't realized mattered until the question made them concrete.
+
+That's the loop Elicitkit makes structured: the agent composes the questionnaire from your natural-language brief, you click through it, and now you and the agent share the same context. The next prompt — the one writing the spec, the migration, the PR review — lands in a model that actually knows what you're building.
+
+> **The best prompt is the one the agent interviewed you out of.**
+
 ## Quickstart (integrators)
 
 For agent builders / tool integrators. End users never run any of this — their agent calls `elicit` on their behalf once you've wired the server in.
