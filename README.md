@@ -24,7 +24,7 @@ You're using an AI agent (Claude Code, Codex CLI, Cursor, …) that already has 
 
 **Integrators / agent builders — wire Elicitkit into your agent's environment once.**
 
-Drop the universal MCP block into your client (below), or `claude plugin install elicitkit/elicitkit/plugin`, or call the HTTP/CLI surface directly. Your users prompt naturally; the agent composes the `AskSet` and calls `elicit`. Recipes for the MCP / HTTP / CLI surfaces are in [`examples/`](./examples). The end-user flow is: **(1)** their agent has Elicitkit wired in (you did this once); **(2)** they prompt naturally; **(3)** the agent presents typed questions; they answer; done.
+Drop the universal MCP block into your client (below) — one snippet, every client — or call the HTTP/CLI surface directly. Your users prompt naturally; the agent composes the `AskSet` and calls `elicit`. Recipes for the MCP / HTTP / CLI surfaces are in [`examples/`](./examples). The end-user flow is: **(1)** their agent has Elicitkit wired in (you did this once); **(2)** they prompt naturally; **(3)** the agent presents typed questions; they answer; done.
 
 ## The pitch
 
@@ -43,21 +43,29 @@ One prerequisite: **Node ≥ 20**. No clone, no absolute paths, no bundled binar
 
 ### Add the MCP server to any MCP client
 
-Drop this one block anywhere a client takes MCP server config:
+Drop this one block anywhere a client takes MCP server config. Same snippet, every client:
 
 ```json
 { "mcpServers": { "elicitkit": { "command": "npx", "args": ["-y", "@elicitkit/server"] } } }
 ```
 
-Same snippet, everywhere it goes. Where to paste it per client:
+Where to paste it:
 
-- **Claude Code** — `claude plugin install elicitkit/elicitkit/plugin` (bundles the server + a trigger skill; no manual JSON needed).
-- **Codex CLI** — `codex mcp add elicitkit npx -- -y @elicitkit/server`.
+- **Claude Code** — paste into your MCP config.
+- **Codex CLI** — paste into `~/.codex/config.toml` under `[mcp_servers.elicitkit]`, or run `codex mcp add elicitkit npx -- -y @elicitkit/server`.
 - **Cursor** — paste into MCP settings (`Settings → MCP`).
 - **Claude Desktop** — paste into `claude_desktop_config.json` under `mcpServers`.
-- **VS Code / Zed / Continue / Cline / Windsurf / …** — paste into the MCP config block in that client's settings; the shape is identical.
+- **VS Code / Zed / Continue / Cline / Windsurf / …** — paste into that client's MCP config block; the shape is identical.
 
 Verify the server is wired (e.g. `/mcp` in Claude Code or `codex mcp get elicitkit`), then ask for something that needs your input — *"Ask me which environments to deploy to and whether to run migrations."* The agent calls the `elicit` tool itself; the host renders the question; typed answers come back.
+
+#### Optional Claude Code shortcut
+
+```sh
+claude plugin install elicitkit/elicitkit/plugin
+```
+
+One command installs the same MCP server *and* bundles a trigger skill (helps the model know when to call `elicit` without prompting). It's a shortcut, not a separate path — under the hood it wires the identical `npx -y @elicitkit/server` server above.
 
 > `elicit` returns fast — every tool call is bounded by one user answer at most. On the elicitation tier the agent calls `elicit_next(token)` per ask until `pending:false`; on `tui` / `url` / `apps` it collects answers via the tier's channel and calls `elicit_submit(token, answers)`. The server auto-routes slow asks (long text, big code diffs, large ranks) to the panel tier so the per-call MCP timeout is never the gating factor.
 
@@ -86,7 +94,7 @@ Elicitkit is host-authoritative — the host owns the render surface; the server
 | Client | Status |
 |---|---|
 | **Claude Code** (v2.1.143) | ✅ verified — bundled plugin, native MCP elicitation tier |
-| **Codex CLI** (0.124.0) | ⚙️ MCP wiring verified; interactive round via runbook ([below](#codex-cli)) — the headless `codex exec` path cannot complete a human round (it cancels interactive MCP tool calls without a TTY) |
+| **Codex CLI** (v0.132.0) | ✅ verified — native MCP elicitation tier, full interactive round end-to-end ([below](#codex-cli)) |
 
 ### Codex CLI
 
@@ -99,7 +107,7 @@ codex mcp add elicitkit npx -- -y @elicitkit/server
 codex mcp get elicitkit       # → enabled, transport: stdio
 ```
 
-**Drive an interactive round** (a TTY is required — Codex prompts you to approve the MCP tool call and then answers the elicitation; `codex exec` headless will *cancel* the call, so use the interactive client):
+**Drive an interactive round** (Codex prompts you to approve the MCP tool call, then renders each ask as a native prompt):
 
 ```sh
 codex
@@ -108,9 +116,7 @@ codex
   questions.
 ```
 
-**What success looks like:** Codex requests approval for the `elicit` tool → after approval the server negotiates the `elicitation` tier and Codex renders the `ask_code_diff` (per-hunk accept/reject), then `ask_select`, then the optional `ask_text` as native one-at-a-time prompts → the tool returns a validated `Answer[]` (one per ask, `status: "answered" | "declined" | "deferred"`) with `_meta.elicitkit.renderedTier === "elicitation"`. No `elicit_submit` call is needed on this tier — answers resolve inline.
-
-> Verified to the tool boundary headlessly: `codex exec --json` discovers the server and invokes `elicit` with the exact `examples/sample-askset.json` AskSet, but the non-interactive client cancels the call (`"user cancelled MCP tool call"`) because the human elicitation step has no TTY. The interactive runbook above completes the round.
+**What success looks like:** Codex requests approval for the `elicit` tool → after approval the server negotiates the `elicitation` tier and Codex renders the `ask_code_diff` (per-hunk accept/reject), then `ask_select`, then the optional `ask_text` as native one-at-a-time prompts → the agent calls `elicit_next(token)` per ask until `pending:false`, then receives a validated `Answer[]` (one per ask, `status: "answered" | "declined" | "deferred"`) with `_meta.elicitkit.renderedTier === "elicitation"`. Each tool call is bounded by one user answer, so the per-call MCP timeout is never the gating factor.
 
 ## Repo structure
 
