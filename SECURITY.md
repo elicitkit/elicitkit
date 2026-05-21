@@ -5,7 +5,7 @@
 Please report suspected vulnerabilities **privately** — do not open a public issue.
 
 - **Preferred:** GitHub → repository **Security** tab → *Report a vulnerability* (Private Vulnerability Reporting).
-- **Email:** security@elicitkit.com *(TODO: confirm before launch)*.
+- **Email:** security@elicitkit.com.
 
 Please include affected version/commit, a description, and minimal reproduction. We aim to acknowledge within **3 business days** and to agree a coordinated disclosure timeline. There is no paid bug-bounty program.
 

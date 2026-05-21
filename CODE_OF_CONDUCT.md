@@ -15,4 +15,4 @@ Applies in all project spaces (repository, issues, pull requests, discussions) a
 
 Maintainers are responsible for clarifying standards and may remove, edit, or reject contributions, and may temporarily or permanently ban any contributor for behavior they deem inappropriate.
 
-Report concerns privately via GitHub's **Private Vulnerability/Conduct** reporting on the repository, or by email to **conduct@elicitkit.com** *(TODO: confirm before launch)*. All reports are reviewed promptly and confidentially. Enforcement follows the Contributor Covenant's Enforcement Guidelines (correction → warning → temporary ban → permanent ban).
+Report concerns privately via GitHub's **Private Vulnerability/Conduct** reporting on the repository, or by email to **conduct@elicitkit.com**. All reports are reviewed promptly and confidentially. Enforcement follows the Contributor Covenant's Enforcement Guidelines (correction → warning → temporary ban → permanent ban).
