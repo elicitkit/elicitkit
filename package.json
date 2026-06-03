@@ -17,6 +17,8 @@
   "scripts": {
     "build": "pnpm --filter @elicitkit/spec build && pnpm --filter @elicitkit/core build && pnpm --filter @elicitkit/renderers build && pnpm --filter @elicitkit/server build && pnpm --filter @elicitkit/http build && pnpm --filter @elicitkit/cli build && pnpm --filter @elicitkit/conformance build && pnpm --filter @elicitkit/pack-pr-review build && pnpm --filter @elicitkit/playground build",
     "pack:plugin": "node scripts/pack-plugin.mjs",
+    "release": "node scripts/publish.mjs",
+    "release:real": "node scripts/publish.mjs --for-real",
     "test": "pnpm build && pnpm --filter @elicitkit/core test && pnpm --filter @elicitkit/conformance test && pnpm --filter @elicitkit/server test && pnpm --filter @elicitkit/http test && pnpm --filter @elicitkit/cli test && pnpm --filter @elicitkit/pack-pr-review test"
   },
   "devDependencies": {

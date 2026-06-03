@@ -6,9 +6,18 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "bin": { "elicitkit-server": "./dist/bin.js" },
-  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "elicitkit-server": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node test/smoke.mjs"
@@ -19,5 +28,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.25.1"
   },
-  "publishConfig": { "access": "public" }
+  "publishConfig": {
+    "access": "public"
+  }
 }
