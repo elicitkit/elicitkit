@@ -179,11 +179,9 @@ for (const { dir, json } of meta) {
     continue;
   }
   if (FOR_REAL) {
-    const ok = await waitForRegistry(json.name, json.version);
+    const ok = await waitForRegistry(json.name, json.version, 180_000);
     if (!ok) {
-      console.log(red(`    registry didn't propagate in time — downstream packages may fail`));
-      failed.push(tag);
-      break;
+      console.log(yellow(`    registry slow to serve it back — continuing anyway (npm publish does not require a package's deps to be resolvable; install-time resolution catches up)`));
     }
   }
   published.push(tag);
