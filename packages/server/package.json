@@ -1,6 +1,6 @@
 {
   "name": "@elicitkit/server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Elicitkit MCP reference implementation — serves the question catalog over MCP with progressive 4-tier rendering on @mcp-ui/server.",
   "license": "Apache-2.0",
   "type": "module",

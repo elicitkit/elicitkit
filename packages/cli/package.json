@@ -1,6 +1,6 @@
 {
   "name": "@elicitkit/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Elicitkit CLI — the shell-out reach. Pipe an AskSet in, get typed answers out; or render a panel to open in a browser.",
   "license": "Apache-2.0",
   "type": "module",

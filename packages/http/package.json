@@ -1,6 +1,6 @@
 {
   "name": "@elicitkit/http",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Elicitkit HTTP surface — the 'any automation, no MCP' reach. Zero-dependency node:http server over the same core + renderers.",
   "license": "Apache-2.0",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@elicitkit/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Elicitkit core — schema validation + the portable question model. Renderer-agnostic.",
   "license": "Apache-2.0",
   "type": "module",
