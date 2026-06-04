@@ -1,6 +1,6 @@
 {
   "name": "@elicitkit/renderers",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Elicitkit progressive renderers — one AskSet, four tiers (apps · url · elicitation · tui). The reference rendering of the spec's 4-tier contract.",
   "license": "Apache-2.0",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@elicitkit/pack-pr-review",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Elicitkit flagship pack — turn a pull request into a structured per-hunk review AskSet (the v0.1 wedge).",
   "license": "Apache-2.0",
   "type": "module",

@@ -164,9 +164,12 @@ for (const { dir, json } of meta) {
     continue;
   }
   const cwd = join(ROOT, dir);
+  // pnpm publish (not npm) so workspace:* deps are rewritten to real
+  // versions in the published tarball; --no-git-checks since we gate the
+  // clean-tree requirement ourselves above.
   const cmd = FOR_REAL
-    ? `npm publish --access public${OTP ? ` --otp=${OTP}` : ""}`
-    : `npm publish --dry-run --access public`;
+    ? `pnpm publish --no-git-checks --access public${OTP ? ` --otp=${OTP}` : ""}`
+    : `pnpm publish --dry-run --no-git-checks --access public`;
   const res = spawnSync(cmd, { cwd, shell: true, stdio: "inherit" });
   if (res.status !== 0) {
     console.log(red(`    publish failed (exit ${res.status})`));
