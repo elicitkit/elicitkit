@@ -1,6 +1,6 @@
-# Elicitkit Question Spec — v0.1 (Draft)
+# Elicitkit Question Spec — v0.1
 
-_Private working draft. Gitignored. Status: **Draft**, 2026-05-16. The spec is the product; the MCP server is its reference implementation._
+_Status: **Stable** — v0.1. The spec is the product; the MCP server is its reference implementation._
 
 Key words **MUST**, **SHOULD**, **MAY** per RFC 2119.
 
@@ -212,4 +212,4 @@ A "Elicitkit-compliant" implementation MUST: round-trip the envelope (§3) and A
 
 ---
 
-_Next: encode this as JSON Schema (`schema/elicitkit-v0.1.schema.json`), then `packages/core` validates against it._
+_This spec is encoded as JSON Schema in `schema/elicitkit-v0.1.schema.json` and enforced by `@elicitkit/core` and the conformance suite._
